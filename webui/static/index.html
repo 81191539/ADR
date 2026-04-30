@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDE Solver UI</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Local PDE Control Room</p>
+        <h1>2D Diffusion-Convection Solver</h1>
+        <p class="hero-copy">
+          本地编辑 case、自动重新编译 <code>df2d</code>、启动求解，并直接查看输出曲线和快照。
+        </p>
+      </div>
+      <div class="hero-meta">
+        <div class="meta-pill">
+          <span>任务状态</span>
+          <strong id="task-state-badge">idle</strong>
+        </div>
+        <div class="meta-pill">
+          <span>当前 Case</span>
+          <strong id="current-case-label">未选择</strong>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel sidebar">
+        <div class="panel-header">
+          <h2>Case 列表</h2>
+          <button id="refresh-cases-btn" class="ghost-btn" type="button">刷新</button>
+        </div>
+        <div id="case-list" class="case-list"></div>
+      </aside>
+
+      <section class="content">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>环境状态</h2>
+            <button id="refresh-env-btn" class="ghost-btn" type="button">重新检测</button>
+          </div>
+          <div id="env-banner" class="env-banner">正在检测环境...</div>
+          <div id="env-grid" class="status-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Case 参数</h2>
+            <div class="action-row">
+              <button id="save-case-btn" type="button">保存当前 Case</button>
+              <button id="new-case-btn" class="ghost-btn" type="button">新建下一个 Case</button>
+            </div>
+          </div>
+          <form id="case-form" class="form-grid">
+            <div class="form-section">
+              <h3>基础信息</h3>
+              <label>
+                <span>Case ID</span>
+                <input id="field-case-id" type="number" min="1" step="1">
+              </label>
+            </div>
+
+            <div class="form-section">
+              <h3>几何 / 网格</h3>
+              <label><span>lam</span><input data-field="lam" type="number" step="any"></label>
+              <label><span>ny</span><input data-field="ny" type="number" min="1" step="1"></label>
+              <label><span>x_ini_posi</span><input data-field="x_ini_posi" type="number" step="any"></label>
+            </div>
+
+            <div class="form-section">
+              <h3>流动参数</h3>
+              <label><span>Pe</span><input data-field="Pe" type="number" step="any"></label>
+              <label><span>Pe2</span><input data-field="Pe2" type="number" step="any"></label>
+              <label><span>alpha</span><input data-field="alpha" type="number" step="any"></label>
+            </div>
+
+            <div class="form-section">
+              <h3>反应参数</h3>
+              <label><span>eps</span><input data-field="eps" type="number" step="any"></label>
+              <label><span>Da</span><input data-field="Da" type="number" step="any"></label>
+              <label><span>K0</span><input data-field="K0" type="number" step="any"></label>
+            </div>
+
+            <div class="form-section">
+              <h3>吸附区</h3>
+              <label><span>xpo_l</span><input data-field="xpo_l" type="number" min="0" max="1" step="any"></label>
+              <label><span>xpo_r</span><input data-field="xpo_r" type="number" min="0" max="1" step="any"></label>
+            </div>
+
+            <div class="form-section">
+              <h3>时间积分</h3>
+              <label><span>endT</span><input data-field="endT" type="number" min="0" step="any"></label>
+              <label><span>total_count</span><input data-field="total_count" type="number" min="1" step="1"></label>
+              <label><span>coeff_dt</span><input data-field="coeff_dt" type="number" min="0" step="any"></label>
+            </div>
+          </form>
+          <p id="save-hint" class="helper-text">保存后会写入 <code>input/input_parameter_XXXX.txt</code>。</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>构建与运行</h2>
+            <div class="action-row">
+              <button id="build-run-btn" type="button">保存并编译运行</button>
+              <button id="stop-btn" class="danger-btn" type="button">停止任务</button>
+            </div>
+          </div>
+          <div class="run-meta">
+            <div><span>阶段</span><strong id="run-stage">idle</strong></div>
+            <div><span>开始时间</span><strong id="run-started">-</strong></div>
+            <div><span>结束时间</span><strong id="run-finished">-</strong></div>
+            <div><span>构建退出码</span><strong id="build-exit">-</strong></div>
+            <div><span>运行退出码</span><strong id="run-exit">-</strong></div>
+          </div>
+          <div id="run-error" class="error-banner hidden"></div>
+          <div class="log-grid">
+            <div>
+              <h3>构建日志</h3>
+              <pre id="build-log" class="log-panel"></pre>
+            </div>
+            <div>
+              <h3>运行日志</h3>
+              <pre id="run-log" class="log-panel"></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>结果查看</h2>
+            <div class="action-row">
+              <button id="refresh-results-btn" class="ghost-btn" type="button">刷新结果</button>
+              <select id="snapshot-select"></select>
+            </div>
+          </div>
+
+          <div id="results-empty" class="empty-state">
+            还没有可展示的结果。你可以先查看历史 case，或者在环境就绪后运行一次求解。
+          </div>
+
+          <div id="results-body" class="results-body hidden">
+            <div id="summary-grid" class="summary-grid"></div>
+            <div class="chart-grid">
+              <div class="chart-card">
+                <h3>eta_ave 时间序列</h3>
+                <canvas id="eta-chart" width="640" height="260"></canvas>
+              </div>
+              <div class="chart-card">
+                <h3>ee 剖面曲线</h3>
+                <canvas id="profile-chart" width="640" height="260"></canvas>
+              </div>
+            </div>
+            <div class="chart-card">
+              <h3>cc 快照热力图</h3>
+              <canvas id="heatmap-canvas" width="760" height="340"></canvas>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

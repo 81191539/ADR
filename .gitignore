@@ -1,0 +1,47 @@
+# Build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# Object files and compiled binaries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+df2d
+df2d_new
+df2d_old
+df2d_cuda
+
+# Generated documentation and run outputs
+docs/html/
+output/
+results_old/
+
+# Local archives and editor backup files
+*.zip
+*.bak
+*.bak2
+*.old
+*.asv
+*~
+
+# Python/Web UI local state
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
