@@ -9,21 +9,19 @@
 <body>
   <div class="page-shell">
     <header class="hero">
-      <div>
-        <p class="eyebrow">Local PDE Control Room</p>
+      <div class="hero-title">
+        <p class="kicker">Local PDE Control Room</p>
         <h1>2D Diffusion-Convection Solver</h1>
-        <p class="hero-copy">
-          本地编辑 case、自动重新编译 <code>df2d</code>、启动求解，并直接查看输出曲线和快照。
-        </p>
+        <p class="hero-copy">Case 编辑 · 编译运行 · 输出查看</p>
       </div>
-      <div class="hero-meta">
-        <div class="meta-pill">
-          <span>任务状态</span>
-          <strong id="task-state-badge">idle</strong>
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-key">任务状态</span>
+          <strong id="task-state-badge" class="badge state-badge state-idle">idle</strong>
         </div>
-        <div class="meta-pill">
-          <span>当前 Case</span>
-          <strong id="current-case-label">未选择</strong>
+        <div class="stat">
+          <span class="stat-key">当前 Case</span>
+          <strong id="current-case-label" class="stat-value">未选择</strong>
         </div>
       </div>
     </header>
@@ -34,129 +32,399 @@
           <h2>Case 列表</h2>
           <button id="refresh-cases-btn" class="ghost-btn" type="button">刷新</button>
         </div>
+        <div class="case-browser-controls">
+          <label class="case-search">
+            <span>搜索 / 跳转</span>
+            <input id="case-search-input" type="search" placeholder="1-3、1,2,5 或文件名">
+          </label>
+          <button id="clear-case-search-btn" class="ghost-btn compact-btn" type="button">清空</button>
+        </div>
+        <div id="case-list-meta" class="case-list-meta"></div>
         <div id="case-list" class="case-list"></div>
+        <button id="load-more-cases-btn" class="ghost-btn load-more-btn hidden" type="button">加载更多</button>
       </aside>
 
       <section class="content">
-        <section class="panel">
-          <div class="panel-header">
-            <h2>环境状态</h2>
-            <button id="refresh-env-btn" class="ghost-btn" type="button">重新检测</button>
-          </div>
-          <div id="env-banner" class="env-banner">正在检测环境...</div>
-          <div id="env-grid" class="status-grid"></div>
-        </section>
+        <section class="panel workflow-panel">
+          <nav class="tab-list" role="tablist" aria-label="工作流">
+            <button id="tab-env" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="env-tab-panel" data-tab-target="env">
+              环境状态
+            </button>
+            <button id="tab-warmup" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="warmup-tab-panel" data-tab-target="warmup">
+              预热选核
+            </button>
+            <button id="tab-case" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="case-tab-panel" data-tab-target="case">
+              Case 参数
+            </button>
+            <button id="tab-generate" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="generate-tab-panel" data-tab-target="generate">
+              Generate Case
+            </button>
+            <button id="tab-run" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="run-tab-panel" data-tab-target="run">
+              构建与运行
+            </button>
+            <button id="tab-results" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="results-tab-panel" data-tab-target="results">
+              结果查看
+            </button>
+          </nav>
 
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Case 参数</h2>
-            <div class="action-row">
-              <button id="save-case-btn" type="button">保存当前 Case</button>
-              <button id="new-case-btn" class="ghost-btn" type="button">新建下一个 Case</button>
+          <div id="env-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-env">
+            <div class="panel-header">
+              <h2>环境状态</h2>
+              <button id="refresh-env-btn" class="ghost-btn" type="button">重新检测</button>
             </div>
+            <div id="env-banner" class="env-banner">正在检测环境...</div>
+            <div id="env-grid" class="status-grid"></div>
           </div>
-          <form id="case-form" class="form-grid">
-            <div class="form-section">
-              <h3>基础信息</h3>
+
+          <div id="warmup-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-warmup">
+            <div class="panel-header">
+              <h2>预热选核</h2>
+              <div class="action-row">
+                <button id="start-warmup-btn" class="accent-btn" type="button">开始预热</button>
+                <button id="stop-warmup-btn" class="ghost-btn" type="button" disabled>停止预热</button>
+                <button id="apply-warmup-btn" class="ghost-btn" type="button" disabled>应用选中并发数</button>
+              </div>
+            </div>
+            <div class="warmup-meta">
+              <div><span>逻辑处理器</span><strong id="warmup-logical">-</strong></div>
+              <div><span>当前 NUM_THREADS</span><strong id="warmup-num-threads">-</strong></div>
+              <div><span>当前搜索 case 数</span><strong id="warmup-case-count">-</strong></div>
+              <div><span>当前最佳</span><strong id="warmup-best">尚未运行</strong></div>
+            </div>
+            <div class="warmup-controls">
               <label>
-                <span>Case ID</span>
-                <input id="field-case-id" type="number" min="1" step="1">
+                <span>候选并发数</span>
+                <input id="warmup-candidates-input" type="text" placeholder="1,2,4,8,16">
+              </label>
+              <label>
+                <span>测量秒数</span>
+                <input id="warmup-seconds-input" type="number" min="1" step="1" value="30">
+              </label>
+              <label>
+                <span>预热秒数</span>
+                <input id="warmup-warmup-seconds-input" type="number" min="1" step="1" value="3">
               </label>
             </div>
-
-            <div class="form-section">
-              <h3>几何 / 网格</h3>
-              <label><span>lam</span><input data-field="lam" type="number" step="any"></label>
-              <label><span>ny</span><input data-field="ny" type="number" min="1" step="1"></label>
-              <label><span>x_ini_posi</span><input data-field="x_ini_posi" type="number" step="any"></label>
+            <div id="warmup-error" class="env-banner hidden"></div>
+            <div class="table-wrap warmup-table-wrap">
+              <table class="warmup-table">
+                <thead>
+                  <tr>
+                    <th>并发数</th>
+                    <th>总吞吐</th>
+                    <th>单 case 平均</th>
+                    <th>预计耗时</th>
+                    <th>相对最佳</th>
+                    <th>耗时</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody id="warmup-results-body">
+                  <tr><td colspan="7">还没有预热结果。</td></tr>
+                </tbody>
+              </table>
             </div>
-
-            <div class="form-section">
-              <h3>流动参数</h3>
-              <label><span>Pe</span><input data-field="Pe" type="number" step="any"></label>
-              <label><span>Pe2</span><input data-field="Pe2" type="number" step="any"></label>
-              <label><span>alpha</span><input data-field="alpha" type="number" step="any"></label>
-            </div>
-
-            <div class="form-section">
-              <h3>反应参数</h3>
-              <label><span>eps</span><input data-field="eps" type="number" step="any"></label>
-              <label><span>Da</span><input data-field="Da" type="number" step="any"></label>
-              <label><span>K0</span><input data-field="K0" type="number" step="any"></label>
-            </div>
-
-            <div class="form-section">
-              <h3>吸附区</h3>
-              <label><span>xpo_l</span><input data-field="xpo_l" type="number" min="0" max="1" step="any"></label>
-              <label><span>xpo_r</span><input data-field="xpo_r" type="number" min="0" max="1" step="any"></label>
-            </div>
-
-            <div class="form-section">
-              <h3>时间积分</h3>
-              <label><span>endT</span><input data-field="endT" type="number" min="0" step="any"></label>
-              <label><span>total_count</span><input data-field="total_count" type="number" min="1" step="1"></label>
-              <label><span>coeff_dt</span><input data-field="coeff_dt" type="number" min="0" step="any"></label>
-            </div>
-          </form>
-          <p id="save-hint" class="helper-text">保存后会写入 <code>input/input_parameter_XXXX.txt</code>。</p>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <h2>构建与运行</h2>
-            <div class="action-row">
-              <button id="build-run-btn" type="button">保存并编译运行</button>
-              <button id="stop-btn" class="danger-btn" type="button">停止任务</button>
-            </div>
-          </div>
-          <div class="run-meta">
-            <div><span>阶段</span><strong id="run-stage">idle</strong></div>
-            <div><span>开始时间</span><strong id="run-started">-</strong></div>
-            <div><span>结束时间</span><strong id="run-finished">-</strong></div>
-            <div><span>构建退出码</span><strong id="build-exit">-</strong></div>
-            <div><span>运行退出码</span><strong id="run-exit">-</strong></div>
-          </div>
-          <div id="run-error" class="error-banner hidden"></div>
-          <div class="log-grid">
-            <div>
-              <h3>构建日志</h3>
-              <pre id="build-log" class="log-panel"></pre>
-            </div>
-            <div>
-              <h3>运行日志</h3>
-              <pre id="run-log" class="log-panel"></pre>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <h2>结果查看</h2>
-            <div class="action-row">
-              <button id="refresh-results-btn" class="ghost-btn" type="button">刷新结果</button>
-              <select id="snapshot-select"></select>
-            </div>
+            <pre id="warmup-log" class="log-output warmup-log">等待开始预热。</pre>
           </div>
 
-          <div id="results-empty" class="empty-state">
-            还没有可展示的结果。你可以先查看历史 case，或者在环境就绪后运行一次求解。
-          </div>
-
-          <div id="results-body" class="results-body hidden">
-            <div id="summary-grid" class="summary-grid"></div>
-            <div class="chart-grid">
-              <div class="chart-card">
-                <h3>eta_ave 时间序列</h3>
-                <canvas id="eta-chart" width="640" height="260"></canvas>
-              </div>
-              <div class="chart-card">
-                <h3>ee 剖面曲线</h3>
-                <canvas id="profile-chart" width="640" height="260"></canvas>
+          <div id="case-tab-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-case">
+            <div class="panel-header">
+              <h2>Case 参数</h2>
+              <div class="action-row">
+                <button id="save-case-btn" class="ghost-btn" type="button">保存当前 Case</button>
+                <button id="new-case-btn" class="ghost-btn" type="button">新建下一个 Case</button>
               </div>
             </div>
-            <div class="chart-card">
-              <h3>cc 快照热力图</h3>
-              <canvas id="heatmap-canvas" width="760" height="340"></canvas>
+            <form id="case-form" class="form-grid">
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>基础信息</h3>
+                  <span class="form-section-hint">Case 唯一编号</span>
+                </header>
+                <div class="form-section-body">
+                  <label>
+                    <span>Case ID</span>
+                    <input id="field-case-id" type="number" min="1" step="1">
+                  </label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>几何 / 网格</h3>
+                  <span class="form-section-hint">空间离散</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>lam</span><input data-field="lam" type="number" step="any"></label>
+                  <label><span>ny</span><input data-field="ny" type="number" min="1" step="1"></label>
+                  <label><span>x_ini_posi</span><input data-field="x_ini_posi" type="number" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>流动参数</h3>
+                  <span class="form-section-hint">Pe / α</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>Pe</span><input data-field="Pe" type="number" step="any"></label>
+                  <label><span>Pe2</span><input data-field="Pe2" type="number" step="any"></label>
+                  <label><span>alpha</span><input data-field="alpha" type="number" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>反应参数</h3>
+                  <span class="form-section-hint">Da / K0</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>eps</span><input data-field="eps" type="number" step="any"></label>
+                  <label><span>Da</span><input data-field="Da" type="number" step="any"></label>
+                  <label><span>K0</span><input data-field="K0" type="number" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>吸附区</h3>
+                  <span class="form-section-hint">x ∈ [0, 1]</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>xpo_l</span><input data-field="xpo_l" type="number" min="0" max="1" step="any"></label>
+                  <label><span>xpo_r</span><input data-field="xpo_r" type="number" min="0" max="1" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>时间积分</h3>
+                  <span class="form-section-hint">显式步进</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>endT</span><input data-field="endT" type="number" min="0" step="any"></label>
+                  <label><span>total_count</span><input data-field="total_count" type="number" min="1" step="1"></label>
+                  <label><span>coeff_dt</span><input data-field="coeff_dt" type="number" min="0" step="any"></label>
+                </div>
+              </section>
+            </form>
+            <p id="save-hint" class="helper-text">保存后会写入 <code>input/input_parameter_XXXX.toml</code>。</p>
+          </div>
+
+          <div id="generate-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-generate">
+            <div class="panel-header">
+              <h2>Generate Case</h2>
+              <div class="action-row">
+                <button id="preview-generate-btn" class="ghost-btn" type="button">Preview</button>
+                <button id="generate-cases-btn" class="accent-btn" type="button">Generate TOML</button>
+              </div>
+            </div>
+
+            <form id="generate-form" class="generator-grid">
+              <section class="form-section generator-ranges">
+                <header class="form-section-header">
+                  <h3>Scan ranges</h3>
+                  <span class="form-section-hint">logspace(min, max, count)</span>
+                </header>
+                <div class="generator-range-table">
+                  <div class="generator-range-head"><span>param</span><span>min</span><span>max</span><span>count</span></div>
+                  <label><span>alpha</span><input data-gen-field="aMin" type="number" step="any"><input data-gen-field="aMax" type="number" step="any"><input data-gen-field="aCount" type="number" min="1" step="1"></label>
+                  <label><span>Pe</span><input data-gen-field="pe1Min" type="number" step="any"><input data-gen-field="pe1Max" type="number" step="any"><input data-gen-field="pe1Count" type="number" min="1" step="1"></label>
+                  <label><span>Pe2</span><input data-gen-field="pe2Min" type="number" step="any"><input data-gen-field="pe2Max" type="number" step="any"><input data-gen-field="pe2Count" type="number" min="1" step="1"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Fixed parameters</h3>
+                  <span class="form-section-hint">mapped from generate_opt.m</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>lam</span><input data-gen-field="lam" type="number" step="any"></label>
+                  <label><span>eps</span><input data-gen-field="eps" type="number" step="any"></label>
+                  <label><span>Da</span><input data-gen-field="Da" type="number" step="any"></label>
+                  <label><span>K0</span><input data-gen-field="K0" type="number" step="any"></label>
+                  <label><span>ny</span><input data-gen-field="ny" type="number" min="1" step="1"></label>
+                  <label><span>xpo_l</span><input data-gen-field="xpo_l" type="number" min="0" max="1" step="any"></label>
+                  <label><span>xpo_r</span><input data-gen-field="xpo_r" type="number" min="0" max="1" step="any"></label>
+                  <label><span>total_count</span><input data-gen-field="total_count" type="number" min="1" step="1"></label>
+                  <label><span>x_ini_posi</span><input data-gen-field="x_ini_posi" type="number" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Output</h3>
+                  <span class="form-section-hint">input/input_parameter_XXXX.toml</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>startId</span><input data-gen-field="startId" type="number" min="1" step="1"></label>
+                  <label><span>coeffMax</span><input data-gen-field="coeffMax" type="number" min="0" step="any"></label>
+                  <label><span>Sc</span><input data-gen-field="Sc" type="number" min="1" step="any"></label>
+                  <label class="checkbox-line"><input data-gen-field="overwrite" type="checkbox"><span>Overwrite existing ids</span></label>
+                </div>
+              </section>
+            </form>
+
+            <div class="generator-summary">
+              <div><span>Planned</span><strong id="generate-planned">-</strong></div>
+              <div><span>ID range</span><strong id="generate-id-range">-</strong></div>
+              <div><span>Output</span><strong id="generate-output">-</strong></div>
+            </div>
+            <div id="generate-message" class="env-banner">Ready to preview generated cases.</div>
+            <div id="generate-preview" class="generator-preview"></div>
+          </div>
+
+          <div id="run-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-run">
+            <div class="panel-header">
+              <h2>构建与运行</h2>
+              <div class="action-row">
+                <label class="restart-toggle">
+                  <input id="force-restart-checkbox" type="checkbox">
+                  <span>从头重跑</span>
+                </label>
+                <button id="build-run-btn" type="button">保存并编译运行</button>
+                <button id="batch-run-btn" class="accent-btn" type="button">运行当前搜索结果</button>
+                <button id="stop-btn" class="danger-btn" type="button">停止任务</button>
+              </div>
+            </div>
+            <p id="batch-run-scope" class="helper-text">批量范围：全部 case</p>
+
+            <nav class="sub-tab-list" role="tablist" aria-label="构建运行视图">
+              <button id="run-subtab-overview" class="sub-tab-button active" type="button" role="tab" aria-selected="true" data-run-subtab="overview">概览</button>
+              <button id="run-subtab-build" class="sub-tab-button" type="button" role="tab" aria-selected="false" data-run-subtab="build">构建日志</button>
+              <button id="run-subtab-run" class="sub-tab-button" type="button" role="tab" aria-selected="false" data-run-subtab="run">运行日志</button>
+            </nav>
+
+            <section id="run-subpanel-overview" class="run-subpanel" role="tabpanel" aria-labelledby="run-subtab-overview">
+              <div id="run-status-banner" class="run-status-banner run-status-banner--idle">
+                尚未开始任何运行。点击上方“保存并编译运行”或“运行当前搜索结果”开始。
+              </div>
+
+              <div id="stage-chips" class="stage-chips" aria-label="构建运行阶段"></div>
+
+              <div class="overall-progress" aria-label="整体进度">
+                <div class="overall-progress-track">
+                  <div id="overall-progress-fill" class="overall-progress-fill"></div>
+                </div>
+                <div class="overall-progress-meta">
+                  <span id="overall-progress-label">未开始</span>
+                  <strong id="overall-progress-percent">0%</strong>
+                </div>
+              </div>
+
+              <div id="run-kpi" class="run-kpi hidden" aria-label="实时运行指标">
+                <div class="kpi-card">
+                  <span class="kpi-label">case</span>
+                  <strong id="kpi-case" class="kpi-value">-</strong>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">backend</span>
+                  <strong id="kpi-backend" class="kpi-value">-</strong>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">eta</span>
+                  <strong id="kpi-eta" class="kpi-value">-</strong>
+                </div>
+                <div class="kpi-card kpi-card--err">
+                  <span class="kpi-label">err (log10 趋势)</span>
+                  <strong id="kpi-err" class="kpi-value">-</strong>
+                  <canvas id="kpi-err-spark" class="kpi-spark" width="320" height="40"></canvas>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">used</span>
+                  <strong id="kpi-used" class="kpi-value">-</strong>
+                </div>
+              </div>
+
+              <div class="run-meta" aria-label="运行元信息">
+                <div><span>整体状态</span><strong id="run-stage" class="badge state-badge state-idle">idle</strong></div>
+                <div><span>批量进度</span><strong id="batch-progress">-</strong></div>
+                <div><span>开始时间</span><strong id="run-started">-</strong></div>
+                <div><span>结束时间</span><strong id="run-finished">-</strong></div>
+                <div class="run-diagnostic-meta hidden"><span>构建退出码</span><strong id="build-exit" class="badge exit-badge">-</strong></div>
+                <div class="run-diagnostic-meta hidden"><span>运行退出码</span><strong id="run-exit" class="badge exit-badge">-</strong></div>
+              </div>
+
+              <div id="run-error" class="error-banner hidden"></div>
+            </section>
+
+            <section id="run-subpanel-build" class="run-subpanel hidden" role="tabpanel" aria-labelledby="run-subtab-build">
+              <div class="log-toolbar">
+                <h3>构建日志</h3>
+                <span id="build-log-summary" class="log-summary">0 行</span>
+                <div class="log-toolbar-actions">
+                  <label class="log-toggle">
+                    <input type="checkbox" id="build-log-only-errors">
+                    <span>仅错误/警告</span>
+                  </label>
+                  <label class="log-toggle">
+                    <input type="checkbox" id="build-log-follow" checked>
+                    <span>跟随尾部</span>
+                  </label>
+                  <button id="build-log-jump-error" class="ghost-btn compact-btn" type="button">跳到第一个错误</button>
+                  <button id="build-log-copy" class="ghost-btn compact-btn" type="button">复制</button>
+                </div>
+              </div>
+              <div id="build-log" class="log-panel" role="log" aria-live="polite"></div>
+            </section>
+
+            <section id="run-subpanel-run" class="run-subpanel hidden" role="tabpanel" aria-labelledby="run-subtab-run">
+              <div class="log-toolbar">
+                <h3>运行日志</h3>
+                <span id="run-log-summary" class="log-summary">0 行</span>
+                <div class="log-toolbar-actions">
+                  <label class="log-toggle">
+                    <input type="checkbox" id="run-log-only-errors">
+                    <span>仅错误/警告</span>
+                  </label>
+                  <label class="log-toggle">
+                    <input type="checkbox" id="run-log-follow" checked>
+                    <span>跟随尾部</span>
+                  </label>
+                  <button id="run-log-jump-error" class="ghost-btn compact-btn" type="button">跳到第一个错误</button>
+                  <button id="run-log-copy" class="ghost-btn compact-btn" type="button">复制</button>
+                </div>
+              </div>
+              <div id="run-log" class="log-panel" role="log" aria-live="polite"></div>
+            </section>
+          </div>
+
+          <div id="results-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-results">
+            <div class="panel-header">
+              <h2>结果查看</h2>
+              <div class="action-row">
+                <button id="refresh-results-btn" class="ghost-btn" type="button">刷新结果</button>
+                <select id="snapshot-select"></select>
+              </div>
+            </div>
+
+            <div id="results-empty" class="empty-state">
+              还没有可展示的结果。你可以先查看历史 case，或者在环境就绪后运行一次求解。
+            </div>
+
+            <div id="results-body" class="results-body hidden">
+              <dl id="summary-grid" class="details-list"></dl>
+              <div class="results-visual-grid">
+                <div class="chart-card evolution-card">
+                  <h3>cc 浓度场快照</h3>
+                  <canvas id="heatmap-canvas" width="980" height="460"></canvas>
+                </div>
+                <div class="results-side-stack">
+                  <div class="chart-card profile-card">
+                    <h3>eta(x) 剖面</h3>
+                    <canvas id="profile-chart" width="640" height="260"></canvas>
+                  </div>
+                  <div class="chart-card eta-card">
+                    <h3>eta_ave 时间序列</h3>
+                    <canvas id="eta-chart" width="640" height="260"></canvas>
+                  </div>
+                  <div class="chart-card deta-card">
+                    <h3>d(eta_ave)/dt 时间序列</h3>
+                    <canvas id="deta-chart" width="760" height="260"></canvas>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>

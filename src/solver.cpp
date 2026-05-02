@@ -27,12 +27,13 @@ void initialization(SimFields& fields,
 
     const double dis = 2.0 * grid.h / (2.0 * phys::SQRT2 * phys::ATANH_0_9);
 
-    #pragma omp parallel for collapse(2) schedule(static)
+    #pragma omp parallel for schedule(static)
     for (long i = fields.cc.x_lower_bound(); i <= fields.cc.x_upper_bound(); ++i) {
+        double* cc_i = fields.cc.physical_row_data(i);
         for (long j = fields.cc.y_lower_bound(); j <= fields.cc.y_upper_bound(); ++j) {
             const double x = grid.xleft + static_cast<double>(i) * grid.h;
-            fields.cc(i, j) =
-                0.5 * (-std::tanh((x - x_ini_posi) / (phys::SQRT2 * dis)) + 1.0);
+            cc_i[j] = 0.5 *
+                      (-std::tanh((x - x_ini_posi) / (phys::SQRT2 * dis)) + 1.0);
         }
     }
 }
@@ -61,18 +62,6 @@ void full_step_explicit(SimFields& fields,
 
     calc_phi(fields.cc, fields.nc, fields.adv_c, dt,
              grid.nx, grid.ny, grid.h);
-
-    #pragma omp parallel for schedule(static)
-    for (long i = 0; i <= grid.nx; ++i) {
-        fields.ee(i) = fields.ne(i);
-    }
-
-    #pragma omp parallel for collapse(2) schedule(static)
-    for (long i = 0; i <= grid.nx; ++i) {
-        for (long j = 0; j <= grid.ny; ++j) {
-            fields.cc(i, j) = fields.nc(i, j);
-        }
-    }
 }
 
 //-----------------------------------------------------------------------------
@@ -86,14 +75,18 @@ void calc_eta(const Field1D& ee, Field1D& ne,
 {
     const double K0_inv = 1.0 / K0;
     const double coeff = eps * Da;
+    const double* ee_data = ee.physical_data();
+    double* ne_data = ne.physical_data();
 
     #pragma omp parallel for schedule(static)
     for (long i = 0; i <= nx; ++i) {
         const double x = static_cast<double>(i) * h;
         if (x > xpo_l && x <= xpo_r) {
-            ne(i) = ee(i) + dt * coeff * (cc(i, 0) * (1.0 - ee(i)) - ee(i) * K0_inv);
+            const double eta = ee_data[i];
+            ne_data[i] = eta + dt * coeff *
+                         (cc.physical_row_data(i)[0] * (1.0 - eta) - eta * K0_inv);
         } else {
-            ne(i) = 0.0;
+            ne_data[i] = 0.0;
         }
     }
 }
@@ -116,25 +109,32 @@ void augment_phi(Field2D& cc, const Field1D& ee,
                  double xpo_l, double xpo_r,
                  double c0)
 {
+    double* left_ghost = cc.physical_row_data(-1);
+    double* left = cc.physical_row_data(0);
+    const double* right = cc.physical_row_data(nx);
+    double* right_ghost = cc.physical_row_data(nx + 1);
     for (long j = cc.y_lower_bound(); j <= cc.y_upper_bound(); ++j) {
-        cc(-1, j) = c0;
-        cc(0, j) = c0;
-        cc(nx + 1, j) = cc(nx, j);
+        left_ghost[j] = c0;
+        left[j] = c0;
+        right_ghost[j] = right[j];
     }
 
     const double K0_inv = 1.0 / K0;
     const double h_Da = h * Da;
+    const double* ee_data = ee.physical_data();
 
     #pragma omp parallel for schedule(static)
     for (long i = 0; i <= nx; ++i) {
-        cc(i, ny + 1) = cc(i, ny);
+        double* cc_i = cc.physical_row_data(i);
+        cc_i[ny + 1] = cc_i[ny];
 
         const double x = static_cast<double>(i) * h;
         if (x > xpo_l && x <= xpo_r) {
-            cc(i, -1) = cc(i, 0) -
-                        h_Da * (cc(i, 0) * (1.0 - ee(i)) - ee(i) * K0_inv);
+            const double eta = ee_data[i];
+            cc_i[-1] = cc_i[0] -
+                       h_Da * (cc_i[0] * (1.0 - eta) - eta * K0_inv);
         } else {
-            cc(i, -1) = cc(i, 0);
+            cc_i[-1] = cc_i[0];
         }
     }
 }
@@ -161,19 +161,21 @@ void oscillatory(double alpha, double Sc,
     const double two_sa_sh = 2.0 * sa * sh;
     const double two_ca_ch = 2.0 * ca * ch;
     const double coeff = dcc * da2;
+    const double* yy_data = yy.physical_data();
+    double* ff_data = ff.physical_data();
 
     #pragma omp parallel for schedule(static)
     for (long j = 0; j <= ny; ++j) {
-        const double arg = 2.0 * alpha * (yy(j) - 0.5);
+        const double arg = 2.0 * alpha * (yy_data[j] - 0.5);
         const double say = std::sin(arg);
         const double cay = std::cos(arg);
         const double shay = std::sinh(arg);
         const double chay = std::cosh(arg);
 
-        ff(j) = coeff * (c2_ch2_sat
-               + two_sa_sh * cay * cat * chay
-               - two_sa_sh * say * sat * shay
-               - two_ca_ch * (cay * chay * sat + cat * say * shay));
+        ff_data[j] = coeff * (c2_ch2_sat
+                   + two_sa_sh * cay * cat * chay
+                   - two_sa_sh * say * sat * shay
+                   - two_ca_ch * (cay * chay * sat + cat * say * shay));
     }
 }
 
@@ -186,16 +188,24 @@ void advection_c(const Field2D& oc, Field2D& adv_c,
                  double Pe, double Pe2)
 {
     const double h_inv = 1.0 / h;
+    const double* yy_data = yy.physical_data();
+    const double* ff_data = ff.physical_data();
 
-    #pragma omp parallel for collapse(2) schedule(static)
+    #pragma omp parallel for schedule(static)
     for (long i = 0; i <= nx; ++i) {
+        const double* oc_im = oc.physical_row_data(i - 1);
+        const double* oc_i = oc.physical_row_data(i);
+        const double* oc_ip = oc.physical_row_data(i + 1);
+        double* adv_i = adv_c.physical_row_data(i);
+        #pragma omp simd
         for (long j = 0; j <= ny; ++j) {
-            const double du = Pe * yy(j) * (1.0 - yy(j)) + Pe2 * ff(j);
-            if (du > 0.0) {
-                adv_c(i, j) = du * (oc(i, j) - oc(i - 1, j)) * h_inv;
-            } else {
-                adv_c(i, j) = du * (oc(i + 1, j) - oc(i, j)) * h_inv;
-            }
+            const double y = yy_data[j];
+            const double du = Pe * y * (1.0 - y) + Pe2 * ff_data[j];
+            const double back_diff = (oc_i[j] - oc_im[j]) * h_inv;
+            const double fwd_diff = (oc_ip[j] - oc_i[j]) * h_inv;
+            const double pos = 0.5 * (du + std::fabs(du));
+            const double neg = 0.5 * (du - std::fabs(du));
+            adv_i[j] = pos * back_diff + neg * fwd_diff;
         }
     }
 }
@@ -209,35 +219,47 @@ void calc_phi(const Field2D& cc, Field2D& nc,
 {
     const double h2_inv = 1.0 / (h * h);
 
-    #pragma omp parallel for collapse(2) schedule(static)
+    #pragma omp parallel for schedule(static)
     for (long i = 0; i <= nx; ++i) {
+        const double* cc_im = cc.physical_row_data(i - 1);
+        const double* cc_i = cc.physical_row_data(i);
+        const double* cc_ip = cc.physical_row_data(i + 1);
+        const double* adv_i = adv_c.physical_row_data(i);
+        double* nc_i = nc.physical_row_data(i);
+        #pragma omp simd
         for (long j = 0; j <= ny; ++j) {
             const double lap =
-                ((cc(i + 1, j) - 2.0 * cc(i, j) + cc(i - 1, j)) +
-                 (cc(i, j + 1) - 2.0 * cc(i, j) + cc(i, j - 1))) * h2_inv;
-            const double sr = -adv_c(i, j);
-            nc(i, j) = cc(i, j) + dt * (lap + sr);
+                ((cc_ip[j] - 2.0 * cc_i[j] + cc_im[j]) +
+                 (cc_i[j + 1] - 2.0 * cc_i[j] + cc_i[j - 1])) * h2_inv;
+            const double sr = -adv_i[j];
+            nc_i[j] = cc_i[j] + dt * (lap + sr);
         }
     }
 }
 
 //-----------------------------------------------------------------------------
-// Check whether a field contains NaNs.
+// Check whether a concentration field contains non-physical values.
 //-----------------------------------------------------------------------------
-bool has_nan(const Field2D& field, long nx, long ny)
+bool has_unstable_values(const Field2D& field, long nx, long ny)
 {
-    bool found_nan = false;
+    constexpr double negative_tolerance = -1e-12;
+    constexpr double max_reasonable_magnitude = 1e12;
+    bool found_unstable = false;
 
-    #pragma omp parallel for collapse(2) reduction(||:found_nan)
+    #pragma omp parallel for schedule(static) reduction(||:found_unstable)
     for (long i = 0; i <= nx; ++i) {
+        const double* field_i = field.physical_row_data(i);
         for (long j = 0; j <= ny; ++j) {
-            if (std::isnan(field(i, j))) {
-                found_nan = true;
+            const double value = field_i[j];
+            if (!std::isfinite(value) ||
+                value < negative_tolerance ||
+                std::fabs(value) > max_reasonable_magnitude) {
+                found_unstable = true;
             }
         }
     }
 
-    return found_nan;
+    return found_unstable;
 }
 
 //-----------------------------------------------------------------------------
@@ -249,11 +271,12 @@ double compute_eta_average(const Field1D& eta,
 {
     double eta_ave = 0.0;
     long count = 0;
+    const double* eta_data = eta.physical_data();
 
     for (long i = 0; i <= grid.nx; ++i) {
         const double x = grid.xleft + static_cast<double>(i) * grid.h;
         if (x > zone.xpo_l && x < zone.xpo_r) {
-            eta_ave += eta(i);
+            eta_ave += eta_data[i];
             ++count;
         }
     }

@@ -50,6 +50,13 @@ struct ExecutionConfig {
     ComputeBackend backend{ComputeBackend::Cpu};
     int            device_id{0};
     bool           gpu_reduce_stats{true};
+    std::vector<int> case_numbers;
+    bool             force_restart{false};
+    bool             benchmark_mode{false};
+    int              benchmark_concurrency{1};
+    std::vector<int> benchmark_case_numbers;
+    double           benchmark_seconds{30.0};
+    double           benchmark_warmup_seconds{3.0};
 };
 
 /**
@@ -343,6 +350,7 @@ struct RunLog {
 
     long   actual_iterations{};
     int    nan_events{};
+    int    instability_events{};
     int    output_count{};
     bool   converged{};
     double final_eta{};

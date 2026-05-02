@@ -104,13 +104,14 @@ Case 3 invalid: K0 must be greater than 0.
 
 ### 5. 统一构建方式
 
-项目同时存在 `CMakeLists.txt` 和 `makefile`，但 Web UI 目前只调用 WSL 中的 `make clean && make`。
+项目同时存在 `CMakeLists.txt` 和 `makefile`。Web UI 应以 CMake 为主构建入口，`makefile` 仅作为 legacy 兼容入口。
 
 建议：
 
-- 长期统一到 CMake。
-- Web UI 调用 `cmake --build build`。
-- 保留 makefile 作为轻量兼容入口，或明确标注为 legacy。
+- Web UI 调用 `cmake -S . -B build` 和 `cmake --build build`。
+- 本机 CMake 可用时优先使用本机构建环境。
+- 本机不可用时再回退到 WSL + CMake。
+- 保留 makefile 作为轻量 legacy 入口。
 
 预期收益：
 
@@ -175,9 +176,16 @@ alpha = 0.01
 
 ## 可用性提升建议
 
-### 9. 修复中文乱码
+### 9. 统一声明和验证 UTF-8 编码
 
-部分中文注释和 `webui/README.md` 存在编码乱码。建议统一转换为 UTF-8。
+源文件本身按 UTF-8 读取时中文正常；常见乱码更可能来自终端或 PowerShell 默认编码。建议统一声明 UTF-8，并在文档中说明终端显示配置。
+
+建议：
+
+- 添加 `.editorconfig`，声明 `charset = utf-8`。
+- Web UI/Python 启动入口设置 UTF-8 环境。
+- 文档说明 PowerShell 可用 `chcp 65001` 或设置 `$OutputEncoding`。
+- 不在未验证文件字节损坏的情况下批量转码。
 
 预期收益：
 
