@@ -1,0 +1,16 @@
+﻿legacy_marker = 1
+lam = 0.033333
+Pe = 1000
+Pe2 = 1584.89319246
+eps = 0.1
+Da = 100
+K0 = 1
+ny = 8
+xpo_l = 0.333333
+xpo_r = 0.666667
+endT = 0.002
+total_count = 1
+coeff_dt = 0.1
+x_ini_posi = 5
+alpha = 0.0063095734448
+

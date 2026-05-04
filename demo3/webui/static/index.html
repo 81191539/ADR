@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>demo3 PDE Dashboard</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="kicker">demo3 control room</p>
+        <h1>2D Diffusion-Convection Solver</h1>
+        <p class="hero-copy">Case editing, generation, warmup, batch execution, and result inspection.</p>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><span class="stat-key">Task</span><strong id="task-state-badge" class="badge state-badge state-idle">idle</strong></div>
+        <div class="stat"><span class="stat-key">Current Case</span><strong id="current-case-label" class="stat-value">none</strong></div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel sidebar">
+        <div class="panel-header"><h2>Case List</h2><button id="refresh-cases-btn" class="ghost-btn" type="button">Refresh</button></div>
+        <div class="case-browser-controls">
+          <label class="case-search"><span>Search / jump</span><input id="case-search-input" type="search" placeholder="1-3, 1,2,5, or file name"></label>
+          <button id="clear-case-search-btn" class="ghost-btn compact-btn" type="button">Clear</button>
+        </div>
+        <div id="case-list-meta" class="case-list-meta"></div>
+        <div id="case-list" class="case-list"></div>
+        <button id="load-more-cases-btn" class="ghost-btn load-more-btn hidden" type="button">Load more</button>
+      </aside>
+
+      <section class="content">
+        <section class="panel workflow-panel">
+          <nav class="tab-list" role="tablist" aria-label="Workflow">
+            <button id="tab-env" class="tab-button" type="button" data-tab-target="env">Environment</button>
+            <button id="tab-warmup" class="tab-button" type="button" data-tab-target="warmup">Warmup</button>
+            <button id="tab-case" class="tab-button active" type="button" data-tab-target="case">Case Params</button>
+            <button id="tab-generate" class="tab-button" type="button" data-tab-target="generate">Generate Case</button>
+            <button id="tab-run" class="tab-button" type="button" data-tab-target="run">Run Dashboard</button>
+            <button id="tab-results" class="tab-button" type="button" data-tab-target="results">Results</button>
+          </nav>
+
+          <div id="env-tab-panel" class="tab-panel hidden">
+            <div class="panel-header"><h2>Environment</h2><button id="refresh-env-btn" class="ghost-btn" type="button">Recheck</button></div>
+            <div id="env-banner" class="env-banner">Checking environment...</div>
+            <div id="env-grid" class="status-grid"></div>
+          </div>
+
+          <div id="warmup-tab-panel" class="tab-panel hidden">
+            <div class="panel-header">
+              <h2>Warmup Benchmark</h2>
+              <div class="action-row">
+                <button id="start-warmup-btn" class="accent-btn" type="button">Start Warmup</button>
+                <button id="stop-warmup-btn" class="ghost-btn" type="button" disabled>Stop</button>
+                <button id="apply-warmup-btn" class="ghost-btn" type="button" disabled>Apply Selected</button>
+              </div>
+            </div>
+            <div class="warmup-meta">
+              <div><span>Logical CPUs</span><strong id="warmup-logical">-</strong></div>
+              <div><span>NUM_THREADS</span><strong id="warmup-num-threads">-</strong></div>
+              <div><span>Scope cases</span><strong id="warmup-case-count">-</strong></div>
+              <div><span>Best</span><strong id="warmup-best">not run</strong></div>
+            </div>
+            <div class="warmup-controls">
+              <label><span>Candidates</span><input id="warmup-candidates-input" type="text" placeholder="1,2,4,8,16"></label>
+              <label><span>Measure seconds</span><input id="warmup-seconds-input" type="number" min="1" step="1" value="30"></label>
+              <label><span>Warmup seconds</span><input id="warmup-warmup-seconds-input" type="number" min="1" step="1" value="3"></label>
+            </div>
+            <div id="warmup-error" class="env-banner hidden"></div>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>Concurrency</th><th>Total throughput</th><th>Worker min</th><th>Worker median</th><th>Worker p90</th><th>Slowest</th><th>Tail ETA</th><th>Samples</th><th>Status</th></tr></thead><tbody id="warmup-results-body"><tr><td colspan="9">No warmup results yet.</td></tr></tbody></table></div>
+            <pre id="warmup-log" class="log-output warmup-log">Waiting to start.</pre>
+          </div>
+
+          <div id="case-tab-panel" class="tab-panel">
+            <div class="panel-header"><h2>Case Parameters</h2><div class="action-row"><button id="save-case-btn" class="ghost-btn" type="button">Save Case</button><button id="new-case-btn" class="ghost-btn" type="button">New Next Case</button></div></div>
+            <form id="case-form" class="form-grid">
+              <section class="form-section"><header><h3>Identity</h3><span>case id</span></header><div class="form-section-body"><label><span>Case ID</span><input id="field-case-id" type="number" min="1" step="1"></label></div></section>
+              <section class="form-section"><header><h3>Geometry / Mesh</h3><span>space grid</span></header><div class="form-section-body"><label><span>lam</span><input data-field="lam" type="number" step="any"></label><label><span>ny</span><input data-field="ny" type="number" min="1" step="1"></label><label><span>x_ini_posi</span><input data-field="x_ini_posi" type="number" step="any"></label></div></section>
+              <section class="form-section"><header><h3>Flow</h3><span>Pe / alpha</span></header><div class="form-section-body"><label><span>Pe</span><input data-field="Pe" type="number" step="any"></label><label><span>Pe2</span><input data-field="Pe2" type="number" step="any"></label><label><span>alpha</span><input data-field="alpha" type="number" step="any"></label></div></section>
+              <section class="form-section"><header><h3>Reaction</h3><span>Da / K0</span></header><div class="form-section-body"><label><span>eps</span><input data-field="eps" type="number" step="any"></label><label><span>Da</span><input data-field="Da" type="number" step="any"></label><label><span>K0</span><input data-field="K0" type="number" step="any"></label></div></section>
+              <section class="form-section"><header><h3>Adsorption Zone</h3><span>x in [0,1]</span></header><div class="form-section-body"><label><span>xpo_l</span><input data-field="xpo_l" type="number" min="0" max="1" step="any"></label><label><span>xpo_r</span><input data-field="xpo_r" type="number" min="0" max="1" step="any"></label></div></section>
+              <section class="form-section"><header><h3>Time Integration</h3><span>explicit stepping</span></header><div class="form-section-body"><label><span>endT</span><input data-field="endT" type="number" min="0" step="any"></label><label><span>total_count</span><input data-field="total_count" type="number" min="1" step="1"></label><label><span>coeff_dt</span><input data-field="coeff_dt" type="number" min="0" step="any"></label></div></section>
+            </form>
+            <p id="save-hint" class="helper-text">Save writes to input/input_parameter_XXXX.toml.</p>
+          </div>
+
+          <div id="generate-tab-panel" class="tab-panel hidden">
+            <div class="panel-header"><h2>Generate Case</h2><div class="action-row"><button id="preview-generate-btn" class="ghost-btn" type="button">Preview</button><button id="generate-cases-btn" class="accent-btn" type="button">Generate TOML</button></div></div>
+            <form id="generate-form" class="generator-grid">
+              <section class="form-section generator-ranges"><header><h3>Scan ranges</h3><span>logspace(min,max,count)</span></header><div class="generator-range-table"><div class="generator-range-head"><span>param</span><span>min</span><span>max</span><span>count</span></div><label><span>alpha</span><input data-gen-field="aMin" type="number" step="any"><input data-gen-field="aMax" type="number" step="any"><input data-gen-field="aCount" type="number" min="1" step="1"></label><label><span>Pe</span><input data-gen-field="pe1Min" type="number" step="any"><input data-gen-field="pe1Max" type="number" step="any"><input data-gen-field="pe1Count" type="number" min="1" step="1"></label><label><span>Pe2</span><input data-gen-field="pe2Min" type="number" step="any"><input data-gen-field="pe2Max" type="number" step="any"><input data-gen-field="pe2Count" type="number" min="1" step="1"></label></div></section>
+              <section class="form-section"><header><h3>Fixed parameters</h3><span>from generate_opt.m</span></header><div class="form-section-body"><label><span>lam</span><input data-gen-field="lam" type="number" step="any"></label><label><span>eps</span><input data-gen-field="eps" type="number" step="any"></label><label><span>Da</span><input data-gen-field="Da" type="number" step="any"></label><label><span>K0</span><input data-gen-field="K0" type="number" step="any"></label><label><span>ny</span><input data-gen-field="ny" type="number" min="1" step="1"></label><label><span>xpo_l</span><input data-gen-field="xpo_l" type="number" min="0" max="1" step="any"></label><label><span>xpo_r</span><input data-gen-field="xpo_r" type="number" min="0" max="1" step="any"></label><label><span>total_count</span><input data-gen-field="total_count" type="number" min="1" step="1"></label><label><span>x_ini_posi</span><input data-gen-field="x_ini_posi" type="number" step="any"></label></div></section>
+              <section class="form-section"><header><h3>Output</h3><span>input files</span></header><div class="form-section-body"><label><span>startId</span><input data-gen-field="startId" type="number" min="1" step="1"></label><label><span>coeffMax</span><input data-gen-field="coeffMax" type="number" min="0" step="any"></label><label><span>Sc</span><input data-gen-field="Sc" type="number" min="1" step="any"></label><label class="checkbox-line"><input data-gen-field="overwrite" type="checkbox"><span>Overwrite existing ids</span></label></div></section>
+            </form>
+            <div class="generator-summary"><div><span>Planned</span><strong id="generate-planned">-</strong></div><div><span>ID range</span><strong id="generate-id-range">-</strong></div><div><span>Output</span><strong id="generate-output">-</strong></div></div>
+            <div id="generate-message" class="env-banner">Ready to preview generated cases.</div>
+            <div id="generate-preview" class="generator-preview"></div>
+          </div>
+
+          <div id="run-tab-panel" class="tab-panel hidden">
+            <div class="panel-header"><h2>Batch Run Dashboard</h2><div class="action-row"><label class="restart-toggle"><input id="force-restart-checkbox" type="checkbox"><span>Force restart</span></label><button id="build-run-btn" type="button">Save and Run Current</button><button id="batch-run-btn" class="accent-btn" type="button">Run Current Search</button><button id="stop-btn" class="danger-btn" type="button">Stop</button></div></div>
+            <p id="batch-run-scope" class="helper-text">Batch scope: all cases</p>
+            <div id="run-error" class="error-banner hidden"></div>
+            <section class="dashboard-sticky">
+              <div id="run-status-banner" class="run-status-banner run-status-banner--idle">No run has started.</div>
+              <div class="dash-kpi-grid">
+                <div><span>Total</span><strong id="dash-total">0</strong></div><div><span>Done</span><strong id="dash-completed">0</strong></div><div><span>Running</span><strong id="dash-running">0</strong></div><div><span>Failed</span><strong id="dash-failed">0</strong></div><div><span>Waiting</span><strong id="dash-waiting">0</strong></div><div><span>Progress</span><strong id="dash-progress">0%</strong></div><div><span>Throughput</span><strong id="dash-throughput">0/h</strong></div><div><span>ETA</span><strong id="dash-eta">-</strong></div><div><span>Failure rate</span><strong id="dash-failure-rate">0%</strong></div>
+              </div>
+              <div class="progress-strip"><div id="run-progress-bar"></div></div>
+            </section>
+            <section class="dashboard-grid">
+              <div class="dashboard-main">
+                <div class="section-heading"><h3>alpha x Pe2 status matrix</h3><div class="matrix-legend"><span class="dot waiting"></span>waiting <span class="dot running"></span>running <span class="dot finished"></span>done <span class="dot failed"></span>failed <span class="dot suspicious"></span>attention</div></div>
+                <canvas id="case-matrix-canvas" class="matrix-canvas" width="1100" height="620"></canvas>
+                <div id="matrix-detail" class="matrix-detail">Click a cell to inspect its cases.</div>
+              </div>
+              <aside class="dashboard-side"><div class="section-heading"><h3>Running cases</h3></div><div id="running-cards" class="running-cards"><div class="empty-state compact">No running cases.</div></div></aside>
+            </section>
+            <section class="attention-section"><div class="section-heading"><h3>Attention cases</h3><span id="duration-p95-label">P95: -</span></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Case</th><th>Status</th><th>alpha</th><th>Pe2</th><th>Progress</th><th>Duration</th><th>Reason</th><th>Actions</th></tr></thead><tbody id="attention-body"><tr><td colspan="8">No attention cases.</td></tr></tbody></table></div></section>
+            <details class="global-log-details"><summary>Global build/run logs</summary><div class="log-columns"><div><div class="log-toolbar"><h3>Build log</h3><span id="build-log-summary" class="log-summary">0 lines</span><button id="build-log-copy" class="ghost-btn compact-btn" type="button">Copy</button><button id="build-log-jump-error" class="ghost-btn compact-btn" type="button">First issue</button><label class="log-toggle"><input type="checkbox" id="build-log-only-errors"><span>Only issues</span></label><input type="checkbox" id="build-log-follow" class="hidden" checked></div><div id="build-log" class="log-panel"></div></div><div><div class="log-toolbar"><h3>Run log</h3><span id="run-log-summary" class="log-summary">0 lines</span><button id="run-log-copy" class="ghost-btn compact-btn" type="button">Copy</button><button id="run-log-jump-error" class="ghost-btn compact-btn" type="button">First issue</button><label class="log-toggle"><input type="checkbox" id="run-log-only-errors"><span>Only issues</span></label><input type="checkbox" id="run-log-follow" class="hidden" checked></div><div id="run-log" class="log-panel"></div></div></div></details>
+            <div class="legacy-run-meta hidden"><strong id="run-stage">idle</strong><strong id="batch-progress">-</strong><strong id="run-started">-</strong><strong id="run-finished">-</strong><strong id="build-exit">-</strong><strong id="run-exit">-</strong><div id="stage-chips"></div><div id="overall-progress-fill"></div><span id="overall-progress-label"></span><strong id="overall-progress-percent"></strong><div id="run-kpi"></div><strong id="kpi-case"></strong><strong id="kpi-backend"></strong><strong id="kpi-eta"></strong><strong id="kpi-err"></strong><strong id="kpi-used"></strong><canvas id="kpi-err-spark"></canvas></div>
+          </div>
+
+          <div id="results-tab-panel" class="tab-panel hidden">
+            <div class="panel-header"><h2>Results</h2><div class="action-row"><button id="refresh-results-btn" class="ghost-btn" type="button">Refresh Results</button><select id="snapshot-select"></select></div></div>
+            <div id="results-empty" class="empty-state">No result is available for the selected case.</div>
+            <div id="results-body" class="results-body hidden"><dl id="summary-grid" class="details-list"></dl><div class="results-visual-grid"><div class="chart-card"><h3>cc snapshot</h3><canvas id="heatmap-canvas" width="980" height="460"></canvas></div><div class="results-side-stack"><div class="chart-card"><h3>eta profile</h3><canvas id="profile-chart" width="640" height="260"></canvas></div><div class="chart-card"><h3>eta_ave series</h3><canvas id="eta-chart" width="640" height="260"></canvas></div><div class="chart-card"><h3>d(eta_ave)/dt series</h3><canvas id="deta-chart" width="760" height="260"></canvas></div></div></div></div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <aside id="diagnostic-drawer" class="diagnostic-drawer" aria-hidden="true"><div class="drawer-header"><div><p class="kicker">diagnostics</p><h2 id="drawer-title">Case log</h2></div><button id="drawer-close-btn" class="ghost-btn" type="button">Close</button></div><div id="drawer-meta" class="drawer-meta"></div><pre id="drawer-log" class="drawer-log">Select a case to inspect logs.</pre></aside>
+  <script src="/app.js" defer></script>
+</body>
+</html>
