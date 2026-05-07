@@ -23,7 +23,7 @@ ADR is a 2D diffusion-convection-adsorption PDE solver. The core solver is writt
 +-- webui/            Local Python/HTML/CSS/JS Web UI
 +-- docs/             Project notes and improvement recommendations
 +-- CMakeLists.txt    Cross-platform CMake build entry
-`-- makefile          Lightweight Linux/WSL build entry
+`-- makefile          CMake shim for common build/test targets
 ```
 
 Generated files such as object files, executables, `output/`, `results_old/`, generated Doxygen HTML, and local archives are intentionally ignored by Git.
@@ -39,16 +39,16 @@ cmake --build build --config Release --target df2d
 
 The CPU executable is built under `build/`. If CUDA is available, CMake can also build `df2d_cuda`.
 
-### Makefile (legacy)
+### Makefile Shim
 
-On Linux or WSL:
+On systems with `make` available:
 
 ```bash
-make clean
 make
+make test
 ```
 
-This builds the CPU executable `df2d` in the project root.
+The Makefile delegates to CMake so source lists are maintained in one place.
 
 ## Run
 
@@ -75,6 +75,7 @@ The static case list in `include/config.h` remains available as a compatibility 
 TOML is the preferred case format:
 
 ```toml
+case_id = 1
 lam = 0.033333
 Pe = 10
 Pe2 = 10
@@ -89,7 +90,26 @@ total_count = 300
 coeff_dt = 0.1
 x_ini_posi = 5
 alpha = 0.01
+Sc = 16667
+
+[runtime]
+stats_interval = 1000
+stability_check_interval = 100
+checkpoint_interval = 50000
+output_matlab = true
+output_tecplot = false
+enable_dense_dump = true
+dense_dump_start = 4.0
+dense_dump_count = 16
+convergence_threshold = 0.001
 ```
+
+`case_id` is metadata; the solver uses the id from the filename or from
+`--case/--cases`. `Sc` is optional and defaults to `16667`, but new TOML files
+should write it explicitly. The `[runtime]` table is optional. If a field is
+omitted, the default comes from `include/config.h`; if a CLI flag sets the same
+field, the CLI value wins. A copyable reference lives at
+`input/input_parameter_reference.toml`.
 
 The legacy single-line parameter record remains supported:
 
@@ -117,6 +137,7 @@ Typical output files are written under `output/`:
 - `remarks_X.m`: run summary and diagnostics.
 - `data_X/cc_N.m`: concentration field snapshot.
 - `data_X/ee_N.m`: surface coverage profile snapshot.
+- `data_X_dense/run_TIMESTAMP/cc_INDEX_tTIME_itITER.m`: dense dump snapshots when enabled.
 - `checkpoint_X.bin`: binary checkpoint for restart/continuation.
 
 ## Web UI
@@ -147,15 +168,32 @@ With CMake and testing enabled:
 
 ```bash
 cmake -S . -B build
-cmake --build build
-ctest --test-dir build
+cmake --build build --target adr_solver_tests
+ctest --test-dir build --output-on-failure
 ```
 
-The current tests cover ghost-cell storage behavior, a basic finite-state CPU explicit step, and concentration stability checks for non-finite, negative, and too-large values.
+The tests cover field storage, CPU finite-state stepping, stability checks
+including eta x-dimension scanning, TOML runtime overrides, CLI validation,
+tiny end-to-end runs, and dense dump run directory behavior.
 
 ## Encoding
 
-Source files and docs are UTF-8. If Chinese comments display as mojibake in PowerShell, switch the terminal to UTF-8, for example with `chcp 65001` or `$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()`. Do not convert repository files to a legacy code page.
+Source files and docs are UTF-8. The checked-in `.editorconfig` and `.gitattributes` keep text files on UTF-8/LF, while `.bat` and `.cmd` files stay CRLF for Windows.
+
+On Windows, launch the Web UI through the provided `.bat` files so `chcp 65001`, `PYTHONUTF8=1`, and `PYTHONIOENCODING=utf-8` are set consistently. If Chinese comments display as mojibake in an interactive PowerShell session, run:
+
+```powershell
+chcp 65001
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+```
+
+Check the repository with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\check_encoding.ps1
+```
+
+Do not convert repository files to GBK/ANSI or use legacy PowerShell redirection to rewrite source files.
 
 ## Improvement Notes
 

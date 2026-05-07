@@ -10,6 +10,56 @@
 
 #include <omp.h>
 
+#if defined(_MSC_VER)
+#define ADR_RESTRICT __restrict
+#elif defined(__GNUC__) || defined(__clang__)
+#define ADR_RESTRICT __restrict__
+#else
+#define ADR_RESTRICT
+#endif
+
+namespace {
+
+inline void advection_row_kernel(const double* ADR_RESTRICT oc_im,
+                                 const double* ADR_RESTRICT oc_i,
+                                 const double* ADR_RESTRICT oc_ip,
+                                 const double* ADR_RESTRICT yy_data,
+                                 const double* ADR_RESTRICT ff_data,
+                                 double* ADR_RESTRICT adv_i,
+                                 long ny, double h_inv,
+                                 double Pe, double Pe2)
+{
+    #pragma omp simd
+    for (long j = 0; j <= ny; ++j) {
+        const double y = yy_data[j];
+        const double du = Pe * y * (1.0 - y) + Pe2 * ff_data[j];
+        const double back_diff = (oc_i[j] - oc_im[j]) * h_inv;
+        const double fwd_diff = (oc_ip[j] - oc_i[j]) * h_inv;
+        const double pos = du > 0.0 ? du : 0.0;
+        const double neg = du < 0.0 ? du : 0.0;
+        adv_i[j] = pos * back_diff + neg * fwd_diff;
+    }
+}
+
+inline void calc_phi_row_kernel(const double* ADR_RESTRICT cc_im,
+                                const double* ADR_RESTRICT cc_i,
+                                const double* ADR_RESTRICT cc_ip,
+                                const double* ADR_RESTRICT adv_i,
+                                double* ADR_RESTRICT nc_i,
+                                long ny, double h2_inv,
+                                double dt)
+{
+    #pragma omp simd
+    for (long j = 0; j <= ny; ++j) {
+        const double lap =
+            ((cc_ip[j] - 2.0 * cc_i[j] + cc_im[j]) +
+             (cc_i[j + 1] - 2.0 * cc_i[j] + cc_i[j - 1])) * h2_inv;
+        nc_i[j] = cc_i[j] + dt * (lap - adv_i[j]);
+    }
+}
+
+}  // namespace
+
 //-----------------------------------------------------------------------------
 // Initialize coordinates and the concentration front.
 //-----------------------------------------------------------------------------
@@ -197,16 +247,8 @@ void advection_c(const Field2D& oc, Field2D& adv_c,
         const double* oc_i = oc.physical_row_data(i);
         const double* oc_ip = oc.physical_row_data(i + 1);
         double* adv_i = adv_c.physical_row_data(i);
-        #pragma omp simd
-        for (long j = 0; j <= ny; ++j) {
-            const double y = yy_data[j];
-            const double du = Pe * y * (1.0 - y) + Pe2 * ff_data[j];
-            const double back_diff = (oc_i[j] - oc_im[j]) * h_inv;
-            const double fwd_diff = (oc_ip[j] - oc_i[j]) * h_inv;
-            const double pos = 0.5 * (du + std::fabs(du));
-            const double neg = 0.5 * (du - std::fabs(du));
-            adv_i[j] = pos * back_diff + neg * fwd_diff;
-        }
+        advection_row_kernel(oc_im, oc_i, oc_ip, yy_data, ff_data, adv_i,
+                             ny, h_inv, Pe, Pe2);
     }
 }
 
@@ -226,14 +268,7 @@ void calc_phi(const Field2D& cc, Field2D& nc,
         const double* cc_ip = cc.physical_row_data(i + 1);
         const double* adv_i = adv_c.physical_row_data(i);
         double* nc_i = nc.physical_row_data(i);
-        #pragma omp simd
-        for (long j = 0; j <= ny; ++j) {
-            const double lap =
-                ((cc_ip[j] - 2.0 * cc_i[j] + cc_im[j]) +
-                 (cc_i[j + 1] - 2.0 * cc_i[j] + cc_i[j - 1])) * h2_inv;
-            const double sr = -adv_i[j];
-            nc_i[j] = cc_i[j] + dt * (lap + sr);
-        }
+        calc_phi_row_kernel(cc_im, cc_i, cc_ip, adv_i, nc_i, ny, h2_inv, dt);
     }
 }
 
@@ -256,6 +291,29 @@ bool has_unstable_values(const Field2D& field, long nx, long ny)
                 std::fabs(value) > max_reasonable_magnitude) {
                 found_unstable = true;
             }
+        }
+    }
+
+    return found_unstable;
+}
+
+//-----------------------------------------------------------------------------
+// Check whether eta contains non-physical surface coverage values.
+// Eta is stored along x, so the upper index is nx.
+//-----------------------------------------------------------------------------
+bool has_unstable_eta(const Field1D& eta, long nx)
+{
+    constexpr double lower_tolerance = -1e-12;
+    constexpr double upper_tolerance = 1.0 + 1e-6;
+    bool found_unstable = false;
+
+    #pragma omp parallel for schedule(static) reduction(||:found_unstable)
+    for (long i = 0; i <= nx; ++i) {
+        const double value = eta(i);
+        if (!std::isfinite(value) ||
+            value < lower_tolerance ||
+            value > upper_tolerance) {
+            found_unstable = true;
         }
     }
 

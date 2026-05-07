@@ -12,21 +12,21 @@ y=linspace(0,yright,ny+1);
 [xx,yy]= meshgrid(x,y);
 [y2,x2]= ndgrid(x,y);
 
-%% Êä³ö¶¯»­
-Include_movie = 1;  % 0 ²»Êä³ö¶¯Í¼£¬1 Êä³ö¶¯Í¼
+%% è¾“å‡ºåŠ¨ç”»
+Include_movie = 1;  % 0 ä¸è¾“å‡ºåŠ¨å›¾ï¼Œ1 è¾“å‡ºåŠ¨å›¾
 
 if Include_movie == 1
-    cp = sprintf('para_evolve_Pe_%0.2f_Pe2_%0.2f_lam_%0.4f_alpha0.2_%d', Pe, Pe2,lambda, alpha);  %avi¸ñÊ½Êä³ö
-    aviobj=VideoWriter(cp);%ĞÂ½¨½Ğexample.aviµÄÎÄ¼ş
+    cp = sprintf('para_evolve_Pe_%0.2f_Pe2_%0.2f_lam_%0.4f_alpha0.2_%d', Pe, Pe2,lambda, alpha);  %aviæ ¼å¼è¾“å‡º
+    aviobj=VideoWriter(cp);%æ–°å»ºå«example.aviçš„æ–‡ä»¶
     aviobj.FrameRate = 3;
-    open(aviobj); %´ò¿ªexample.aviµÄÎÄ¼ş
+    open(aviobj); %æ‰“å¼€example.aviçš„æ–‡ä»¶
 end
 
 if Include_movie == 1
-    mpgobj=VideoWriter(cp, 'MPEG-4'); % Ê¹ÓÃ H.264 ±àÂëµÄ MPEG-4 ÎÄ¼ş£¨Windows 7 »ò¸ü¸ß°æ±¾»òÕß Mac OS X 10.7 ¼°¸ü¸ß°æ±¾µÄÏµÍ³£©
+    mpgobj=VideoWriter(cp, 'MPEG-4'); % ä½¿ç”¨ H.264 ç¼–ç çš„ MPEG-4 æ–‡ä»¶ï¼ˆWindows 7 æˆ–æ›´é«˜ç‰ˆæœ¬æˆ–è€… Mac OS X 10.7 åŠæ›´é«˜ç‰ˆæœ¬çš„ç³»ç»Ÿï¼‰
     mpgobj.Quality = 95;
-    mpgobj.FrameRate = 3;  % µ÷ÕûÏÔÊ¾Ö¡Êı,¿ÉÒÔ¿ØÖÆ¶¯»­µÄ¿ìÂı
-    open(mpgobj); %´ò¿ªexample.aviµÄÎÄ¼ş
+    mpgobj.FrameRate = 3;  % è°ƒæ•´æ˜¾ç¤ºå¸§æ•°,å¯ä»¥æ§åˆ¶åŠ¨ç”»çš„å¿«æ…¢
+    open(mpgobj); %æ‰“å¼€example.aviçš„æ–‡ä»¶
 end
 
 BN = 0;
@@ -35,35 +35,35 @@ NN = 10;
 
 step = 1;
 
-num = 1;  % ÓÃÓÚ¿ØÖÆtime_eta_F.mÎÄ¼şÖĞ°üº¬Ê±¼äµÄÃ¿Ò»ĞĞÊı¾İ
+num = 1;  % ç”¨äºæ§åˆ¶time_eta_F.mæ–‡ä»¶ä¸­åŒ…å«æ—¶é—´çš„æ¯ä¸€è¡Œæ•°æ®
 
 for it= BN:step:NN
-    
+
     figure(it+1)
-        
+
     fig1 = figure('PaperSize',[20.98 29.68]);
     axes('Parent',fig1,'Position',[0.3552 0.5838 0.3347 0.3412]);
 
-    %%   µÚÒ»·ùÍ¼
+    %%   ç¬¬ä¸€å¹…å›¾
     subplot(3,2,[1 2 ],'Parent',fig1);
 
     ss=sprintf('data_%d/cc_%d.m', case_number, it );
     ide=load(ss);
 
-    rx1 = [-0.1 xpo_l ];  
+    rx1 = [-0.1 xpo_l ];
     rx2 = [xpo_l xpo_r ];
     rx3 = [xpo_r xright+0.1];
-    ry1 = [-0.2 -0.01]; 
+    ry1 = [-0.2 -0.01];
     ry2 = [1+0.01 1.2];
 
-   hold on 
+   hold on
    lw = 1.25;
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
    plot([rx1(1), rx1(2)],[ry1(1), ry1(1) ], 'k-', 'lineWidth', lw)
    plot([rx1(1), rx1(2)],[ry1(2), ry1(2) ], 'k-', 'lineWidth', lw)
    plot([rx1(1), rx1(1)],[ry1(1), ry1(2) ], 'k-', 'lineWidth', lw)
    plot([rx1(2), rx1(2)],[ry1(1), ry1(2) ], 'k-', 'lineWidth', lw)
-   rct1 = [rx1(1) ry1(1)   
+   rct1 = [rx1(1) ry1(1)
            rx1(1) ry1(2)
            rx1(2) ry1(2)
            rx1(2) ry1(1)];
@@ -73,7 +73,7 @@ for it= BN:step:NN
    plot([rx2(1), rx2(2)],[ry1(2), ry1(2) ], 'k-', 'lineWidth', lw)
    plot([rx2(1), rx2(1)],[ry1(1), ry1(2) ], 'k-', 'lineWidth', lw)
    plot([rx2(2), rx2(2)],[ry1(1), ry1(2) ], 'k-', 'lineWidth', lw)
-   rct2 = [rx2(1) ry1(1)   
+   rct2 = [rx2(1) ry1(1)
            rx2(1) ry1(2)
            rx2(2) ry1(2)
            rx2(2) ry1(1)];
@@ -83,160 +83,160 @@ for it= BN:step:NN
    plot([rx3(1), rx3(2)],[ry1(2), ry1(2) ], 'k-', 'lineWidth', lw)
    plot([rx3(1), rx3(1)],[ry1(1), ry1(2) ], 'k-', 'lineWidth', lw)
    plot([rx3(2), rx3(2)],[ry1(1), ry1(2) ], 'k-', 'lineWidth', lw)
-   rct3 = [rx3(1) ry1(1)   
+   rct3 = [rx3(1) ry1(1)
            rx3(1) ry1(2)
            rx3(2) ry1(2)
            rx3(2) ry1(1)];
    patch(rct3(:,1),rct3(:,2), [0.7 0.7 0.7])
-   
+
    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-      
+
    plot([rx1(1), rx3(2)],[ry2(1), ry2(1) ], 'k-', 'lineWidth', lw)
    plot([rx1(1), rx3(2)],[ry2(2), ry2(2) ], 'k-', 'lineWidth', lw)
    %plot([rx3(1), rx3(1)],[ry2(1), ry2(2) ], 'k-', 'lineWidth', lw)
    %plot([rx3(2), rx3(2)],[ry2(1), ry2(2) ], 'k-', 'lineWidth', lw)
-   rct4 = [rx1(1) ry2(1)   
+   rct4 = [rx1(1) ry2(1)
            rx1(1) ry2(2)
            rx3(2) ry2(2)
            rx3(2) ry2(1)];
    patch(rct4(:,1),rct4(:,2), [0.7 0.7 0.7])
 
- %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  
-   
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
     mesh(y2, x2, ide)
-   
+
     %sp=sprintf('$Pe$ = %d , $\lambda$ = %4.3f', Pe, lambda);
     %txt = title(sp);
     %set(txt, 'Interpreter', 'latex');
-    
-%     format short 
+
+%     format short
 %     lambda = roundn(lambda,-4);
 %     Pe = roundn(Pe,-2);
 %     Pe2 = roundn(Pe2,-2);
 %     alpha = roundn(alpha,-2);
-    
-    cp = sprintf('Pe1 = %0.2f, Pe2 = %0.2f, lam = %0.4f, alpha = %0.2f', Pe, Pe2, lambda, alpha); 
+
+    cp = sprintf('Pe1 = %0.2f, Pe2 = %0.2f, lam = %0.4f, alpha = %0.2f', Pe, Pe2, lambda, alpha);
     %txt = title('$Pe = 30$ , $\lambda = 0.0625$ ');
     txt = title(cp);
     set(txt, 'Interpreter', 'latex', 'FontSize', 25);
 
-    %%%%%%% µ÷ÕûÊ±¼äÏÔÊ¾
+    %%%%%%% è°ƒæ•´æ—¶é—´æ˜¾ç¤º
     sss = num2str(it);
-    time_x = strcat("time_",sss); 
+    time_x = strcat("time_",sss);
     ex = eval(time_x);
     ex = roundn(ex,-3);
     text('Interpreter', 'latex', 'String', ex, ...
-        'Position', [1.4 1.85], 'FontSize', 10)  
+        'Position', [1.4 1.85], 'FontSize', 10)
     text('Interpreter', 'latex', 'String', '$t^* = $', ...
         'Position', [-0.8 1.85], 'FontSize', 11)
     text('Interpreter', 'latex', 'String', '$c^*$', ...
         'Position', [-0.85 -0.9], 'FontSize', 12)
 
-    
+
     set(gca,'fontsize',8)
     yticks(0: 0.5: 1)
     xticks(0: 1: 16)
-    
+
 
     % axis square
     % view(20, 70)
-    
-    view(0, 90)    
-    colormap jet
-    
-    ch = colorbar('horiz');% ºáÏò×ø±êÖá
 
-%     set(get(ch,'title'),'string','[m]','position',[590 15]);% titleµÄÎ»ÖÃ£¬590´ú±í×óÓÒ£¬-15´ú±íÉÏÏÂ£¬¿ÉÒÔ²»¼Óposition·¢ÏÖÄ¬ÈÏÎ»ÖÃÔÚcolorarÖĞ¼ä
-%     set(get(ch,'title'),'string','[m]','position',[590 -15]);% titleµÄÎ»ÖÃ£¬590´ú±í×óÓÒ£¬-15´ú±íÉÏÏÂ£¬¿ÉÒÔ²»¼Óposition·¢ÏÖÄ¬ÈÏÎ»ÖÃÔÚcolorarÖĞ¼ä
+    view(0, 90)
+    colormap jet
+
+    ch = colorbar('horiz');% æ¨ªå‘åæ ‡è½´
+
+%     set(get(ch,'title'),'string','[m]','position',[590 15]);% titleçš„ä½ç½®ï¼Œ590ä»£è¡¨å·¦å³ï¼Œ-15ä»£è¡¨ä¸Šä¸‹ï¼Œå¯ä»¥ä¸åŠ positionå‘ç°é»˜è®¤ä½ç½®åœ¨colorarä¸­é—´
+%     set(get(ch,'title'),'string','[m]','position',[590 -15]);% titleçš„ä½ç½®ï¼Œ590ä»£è¡¨å·¦å³ï¼Œ-15ä»£è¡¨ä¸Šä¸‹ï¼Œå¯ä»¥ä¸åŠ positionå‘ç°é»˜è®¤ä½ç½®åœ¨colorarä¸­é—´
 %     set(ch,'position',[0.135 0.075 0.75 0.015],'ticks',(-1:0.2:1),'ticklength',0.015,'fontsize',12, ...
-%            'ticklabels',{'<-1.0',(-0.8:0.2:0.8),'>1.0'}) % colorbarµÄÎ»ÖÃ£¬[×ó ÏÂ ¿í ¸ß]
+%            'ticklabels',{'<-1.0',(-0.8:0.2:0.8),'>1.0'}) % colorbarçš„ä½ç½®ï¼Œ[å·¦ ä¸‹ å®½ é«˜]
       set(ch,'position',[0.13 0.72 0.775 0.025],'fontsize', 10)
-           
-      
+
+
     caxis([0 1])
-    
+
         %box on
     axis off
     axis image
-    
+
     %axis([0-1, xright+1, 0-0.5, yright+0.5])
 
-    
-    
+
+
     %hold on
-   %%  µÚ¶ş·ùÍ¼
+   %%  ç¬¬äºŒå¹…å›¾
    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     subplot(3,2,[3 4],'Parent',fig1);
-    
+
     ss=sprintf('data_%d/ee_%d.m',case_number, it);
     ee=load(ss);
     plot(ee(:,1), ee(:,2), 'r-', 'LineWidth', 1.5)
 
     xticks(xleft: 2: xright)
-    yticks(yleft: 0.2: 0.6)    
-    set(gca, 'fontsize',10)    
+    yticks(yleft: 0.2: 0.6)
+    set(gca, 'fontsize',10)
     xlabel('\it x', 'Interpreter', 'latex', 'FontSize', 13, 'position',[6.93 -0.095])
     ylabel('$\eta$', 'Interpreter', 'latex', 'FontSize', 13)
-        
-    
+
+
     axis([xleft, xright, 0, 0.6 ])
     %title('\eta','fontsize',13)
     daspect([5 1 1])
     %axis square
     grid on
-%     axis image 
-    
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+%     axis image
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     ee=load('time_eta_F_data.m');
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  µÚÈı·ùÍ¼
-    subplot(3,2,5,'Parent',fig1);  
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  ç¬¬ä¸‰å¹…å›¾
+    subplot(3,2,5,'Parent',fig1);
     plot(ee(1:num,1), ee(1:num,2), 'r-', 'LineWidth', 1.5)
-    
-    set(gca, 'fontsize',10)  % ×¢ÒâÕâÀïÓÃgac»á¶Ôµ±Ç°Í¼ËùÓĞ×ÖÌå´óĞ¡Æğ×÷ÓÃ, 
-                             % Ïëµ¥¶ÀÆğ×÷ÓÃµÄ, ÔÚµ¥¶ÀµÄÃüÁîÖĞÔÙ¼Ó×ÖÌå¿ØÖÆ²ÎÊı!
-    yticks(0: 0.2: 0.6)  % µ÷Õû¿Ì¶ÈÖµÏÔÊ¾
-    xticks(0: 2: endT)    % µ÷Õû¿Ì¶ÈÖµÏÔÊ¾
-    
-    ylabel('$\bar\eta$','Interpreter', 'latex', 'FontSize', 13)  % µ÷ÕûlabelÏÔÊ¾·½Ê½
-    xlabel('$t^*$','Interpreter', 'latex', 'FontSize', 13)  % µ÷ÕûlabelÏÔÊ¾·½Ê½
-    
+
+    set(gca, 'fontsize',10)  % æ³¨æ„è¿™é‡Œç”¨gacä¼šå¯¹å½“å‰å›¾æ‰€æœ‰å­—ä½“å¤§å°èµ·ä½œç”¨,
+                             % æƒ³å•ç‹¬èµ·ä½œç”¨çš„, åœ¨å•ç‹¬çš„å‘½ä»¤ä¸­å†åŠ å­—ä½“æ§åˆ¶å‚æ•°!
+    yticks(0: 0.2: 0.6)  % è°ƒæ•´åˆ»åº¦å€¼æ˜¾ç¤º
+    xticks(0: 2: endT)    % è°ƒæ•´åˆ»åº¦å€¼æ˜¾ç¤º
+
+    ylabel('$\bar\eta$','Interpreter', 'latex', 'FontSize', 13)  % è°ƒæ•´labelæ˜¾ç¤ºæ–¹å¼
+    xlabel('$t^*$','Interpreter', 'latex', 'FontSize', 13)  % è°ƒæ•´labelæ˜¾ç¤ºæ–¹å¼
+
     grid on
     axis([0, endT, -0.05, 0.6])
-    daspect([15 1 1])   % µ÷Õû³¤¿í±È,¹Ì¶¨µÚ¶şÈı¸ö²ÎÊıÎª1,µ÷ÕûµÚÒ»¸ö²ÎÊı´óĞ¡
+    daspect([15 1 1])   % è°ƒæ•´é•¿å®½æ¯”,å›ºå®šç¬¬äºŒä¸‰ä¸ªå‚æ•°ä¸º1,è°ƒæ•´ç¬¬ä¸€ä¸ªå‚æ•°å¤§å°
 
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  µÚËÄ·ùÍ¼
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  ç¬¬å››å¹…å›¾
     subplot(3,2,6,'Parent',fig1);
     plot(ee(1:num,1), ee(1:num,3), 'r-', 'LineWidth', 1.5)
-   
+
     set(gca, 'fontsize',10)
-    
-    yticks(0: 0.2: 0.6)  % µ÷Õû¿Ì¶ÈÖµÏÔÊ¾
-    xticks(0: 2: endT)    % µ÷Õû¿Ì¶ÈÖµÏÔÊ¾
-    
+
+    yticks(0: 0.2: 0.6)  % è°ƒæ•´åˆ»åº¦å€¼æ˜¾ç¤º
+    xticks(0: 2: endT)    % è°ƒæ•´åˆ»åº¦å€¼æ˜¾ç¤º
+
     ylabel('$\mathcal{F}$','Interpreter', 'latex', 'FontSize', 11)
     xlabel('$t^*$','Interpreter', 'latex', 'FontSize', 12)
-   
+
     grid on
     axis([0, endT, -0.05, 0.6])
-    daspect([15 1 1])   % µ÷Õû³¤¿í±È,¹Ì¶¨µÚ¶şÈı¸ö²ÎÊıÎª1,µ÷ÕûµÚÒ»¸ö²ÎÊı´óĞ¡
-    
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-    num = num+1;   
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-    
+    daspect([15 1 1])   % è°ƒæ•´é•¿å®½æ¯”,å›ºå®šç¬¬äºŒä¸‰ä¸ªå‚æ•°ä¸º1,è°ƒæ•´ç¬¬ä¸€ä¸ªå‚æ•°å¤§å°
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    num = num+1;
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
     if Include_movie == 1
         rect=[0 0 543 429];
         currFrame = getframe(gcf,rect);
-        writeVideo(aviobj,currFrame);        
+        writeVideo(aviobj,currFrame);
     end
-    
+
     if Include_movie == 1
         rect=[0 0 543 420];
         currFrame = getframe(gcf,rect);
-        writeVideo(mpgobj,currFrame);        
+        writeVideo(mpgobj,currFrame);
     end
-    
-    
+
+
 end
 
 if Include_movie == 1
@@ -248,31 +248,31 @@ if Include_movie == 1
 end
 %%%plot average eta in another figure
 % figure(1000)
-% 
+%
 % ss=sprintf('time_eta_F_data.m');
 % ee=load(ss);
 % plot(ee(:,1), ee(:,2), 'r-', 'LineWidth', 1)
-%         
+%
 % ylabel('$\eta$','Interpreter', 'latex', 'FontSize', 16)
 % xlabel('$t^*$','Interpreter', 'latex', 'FontSize', 16)
 % set(gca, 'fontsize',15)
-% 
+%
 % axis square
 % grid off
 % axis([0, 40, 0, 0.6])
 
 % for it = BN:step:NN
-%     
+%
 %     figure(it+100)
-%     
+%
 %     ss=sprintf('data/ee_%d.m', it);
 %     ee=load(ss);
 %     plot(ee(:,1), ee(:,2), 'bo-')
-%     
+%
 %     title('\eta')
-%     
+%
 %     %axis square
-%     axis image 
+%     axis image
 % end
 
 

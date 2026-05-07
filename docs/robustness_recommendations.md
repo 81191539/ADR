@@ -183,8 +183,10 @@ alpha = 0.01
 建议：
 
 - 添加 `.editorconfig`，声明 `charset = utf-8`。
-- Web UI/Python 启动入口设置 UTF-8 环境。
+- 添加 `.gitattributes`，固定文本文件换行策略，避免 Git 在 Windows 上反复改写行尾。
+- Web UI/Python 启动入口统一设置 `chcp 65001`、`PYTHONUTF8=1` 和 `PYTHONIOENCODING=utf-8`。
 - 文档说明 PowerShell 可用 `chcp 65001` 或设置 `$OutputEncoding`。
+- 添加 `tools/check_encoding.ps1`，检查 UTF-8 合法性和常见乱码模式。
 - 不在未验证文件字节损坏的情况下批量转码。
 
 预期收益：

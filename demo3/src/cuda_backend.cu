@@ -380,7 +380,13 @@ public:
         int host_has_unstable = 0;
         CUDA_CHECK(cudaMemcpy(&host_has_unstable, d_has_unstable_, sizeof(int),
                               cudaMemcpyDeviceToHost));
-        return host_has_unstable != 0;
+        if (host_has_unstable != 0) {
+            return true;
+        }
+
+        CUDA_CHECK(cudaMemcpy(fields.ee.data(), device_state_.ee.data,
+                              fields.ee.bytes(), cudaMemcpyDeviceToHost));
+        return ::has_unstable_eta(fields.ee, grid.nx);
     }
 
     double compute_eta_average(SimFields& fields,

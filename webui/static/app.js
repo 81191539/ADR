@@ -13,6 +13,7 @@ const PARAM_FIELDS = [
   "coeff_dt",
   "x_ini_posi",
   "alpha",
+  "Sc",
 ];
 
 const GENERATOR_DEFAULTS = {
@@ -145,7 +146,11 @@ async function api(path, options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error || `Request failed: ${response.status}`);
+    const error = new Error(payload.error || `Request failed: ${response.status}`);
+    error.code = payload.code || "REQUEST_FAILED";
+    error.details = payload.details || {};
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -417,8 +422,8 @@ function renderEnv(env) {
   envGridEl.replaceChildren();
   showMessage(
     env.canRun
-      ? "构建环境已就绪，可以保存 case 后直接执行“编译运行”。"
-      : "构建环境未完全就绪。你仍然可以编辑 case 和查看历史结果，但运行按钮会被禁用。"
+      ? "构建环境已就绪，可以保存 case 后直接编译运行。"
+      : "构建环境未完全就绪。仍可编辑 case 和查看历史结果，但运行按钮会被禁用。"
   );
 
   env.checks.forEach((item) => {
@@ -458,7 +463,7 @@ function renderCases() {
     empty.className = "empty-state";
     empty.textContent = state.caseQuery
       ? "没有匹配的 case。可以清空搜索，或输入已有 Case ID 后回车跳转。"
-      : "还没有发现 case 文件，可以先点“新建下一个 Case”。";
+      : "还没有发现 case 文件，可以先点击“新建下一个 Case”。";
     caseListEl.appendChild(empty);
   } else {
     state.cases.forEach((item) => {
@@ -591,21 +596,16 @@ function renderWarmup(status = {}) {
   if (warmupCaseCountEl) warmupCaseCountEl.textContent = String(count || 0);
   if (warmupBestEl) {
     warmupBestEl.textContent = best
-      ? `并发 ${best.concurrency}，预计 ${formatEstimatedMakespan(best.estimatedMakespan)}`
+      ? `并发 ${best.concurrency}，p90 tail 预计 ${formatEstimatedMakespan(best.estimatedMakespan)}`
       : "尚未运行";
   }
 
   if (warmupResultsBodyEl) {
     warmupResultsBodyEl.replaceChildren();
-    const bestMakespan = results
-      .map((item) => Number(item.estimatedMakespan))
-      .filter((value) => Number.isFinite(value) && value > 0)
-      .sort((a, b) => a - b)[0];
-
     if (!results.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
-      cell.colSpan = 7;
+      cell.colSpan = 9;
       cell.textContent = "还没有预热结果。";
       row.appendChild(cell);
       warmupResultsBodyEl.appendChild(row);
@@ -618,17 +618,15 @@ function renderWarmup(status = {}) {
           renderWarmup(state.warmupStatus || {});
         });
 
-        const makespan = Number(item.estimatedMakespan);
-        const relative = Number.isFinite(bestMakespan) && Number.isFinite(makespan) && makespan > 0
-          ? (bestMakespan / makespan) * 100
-          : 0;
         [
           item.concurrency,
           formatThroughput(item.iterationsPerSecond),
-          formatThroughput(item.perWorkerIterationsPerSecond),
+          formatThroughput(item.workerThroughputMin),
+          formatThroughput(item.workerThroughputMedian),
+          formatThroughput(item.workerThroughputP90),
+          formatThroughput(item.workerThroughputSlowest),
           formatEstimatedMakespan(item.estimatedMakespan),
-          `${relative.toFixed(1)}%`,
-          `${Number(item.measurementSeconds || 0).toFixed(1)}s`,
+          String(item.sampleCaseCount || "-"),
           item.status || "-",
         ].forEach((value) => {
           const cell = document.createElement("td");
@@ -754,9 +752,10 @@ function nextCaseId() {
 }
 
 function collectCasePayload() {
-  const payload = {
-    legacy_marker: state.currentCase?.legacy_marker || 1,
-  };
+  const payload = {};
+  if (state.currentCase?.runtime) {
+    payload.runtime = state.currentCase.runtime;
+  }
   PARAM_FIELDS.forEach((field) => {
     const input = document.querySelector(`[data-field="${field}"]`);
     payload[field] = input.value;
@@ -900,8 +899,7 @@ const STAGE_DEFS = [
   { key: "run",       label: "Run",       weight: 0.40 },
 ];
 
-// eta_eq = K0 / (K0 + 1). K0 来自当前 case 表单输入。
-// 批量运行时这只是当前编辑的 case，但通常足够近似。
+// eta_eq = K0 / (K0 + 1). Batch runs use the currently loaded case as an approximation.
 function getCurrentEtaEq() {
   const k0Input = document.querySelector('[data-field="K0"]');
   if (!k0Input) return null;
@@ -968,11 +966,11 @@ function parseStages(buildLog, runLog, status) {
       stages.compile.percent = latestCompilePercent;
     }
   } else if (buildFailed && configureEnd >= 0) {
-    // Build failed before compile started — odd but possible
+    // Build failed before compile started; odd but possible.
     stages.compile.state = "failed";
   }
 
-  // Run — prefer eta-based percent (eta / eta_eq) over step %
+  // Run: prefer eta-based percent (eta / eta_eq) over step %.
   const etaEq = getCurrentEtaEq();
   let latestRunStepPct = 0;
   let latestRunEta = null;
@@ -1079,11 +1077,11 @@ function computeOverallProgress(stages) {
 
 function stageIcon(stateName) {
   switch (stateName) {
-    case "done": return "✓";
-    case "failed": return "✕";
-    case "cancelled": return "◌";
-    case "active": return "•";
-    default: return "○";
+    case "done": return "OK";
+    case "failed": return "!";
+    case "cancelled": return "-";
+    case "active": return "...";
+    default: return ".";
   }
 }
 
@@ -1216,12 +1214,12 @@ function renderOverallProgress(stages, status) {
     case "finished": label = "已完成"; break;
     case "failed": {
       const stuck = findStuckStage(stages);
-      label = stuck ? `失败 · 在 ${stuck.label} 阶段` : "失败";
+      label = stuck ? `失败 · ${stuck.label} 阶段` : "失败";
       break;
     }
     case "stopped": {
       const stuck = findStuckStage(stages);
-      label = stuck ? `已停止 · 在 ${stuck.label} 阶段` : "已停止";
+      label = stuck ? `已停止 · ${stuck.label} 阶段` : "已停止";
       break;
     }
     default: label = "未开始";
@@ -1242,7 +1240,7 @@ function renderOverallProgress(stages, status) {
 
 function renderRunStatusBanner(stages, status) {
   let cls = "run-status-banner--idle";
-  let text = "尚未开始任何运行。点击上方“保存并编译运行”或“运行当前搜索结果”开始。";
+  let text = "尚未开始任何运行。";
   switch (status.status) {
     case "running":
     case "building": {
@@ -1266,7 +1264,7 @@ function renderRunStatusBanner(stages, status) {
     }
     case "finished":
       cls = "run-status-banner--ok";
-      text = "构建与运行均已成功完成";
+      text = "构建与运行均已完成。";
       break;
     case "failed": {
       cls = "run-status-banner--bad";
@@ -1464,7 +1462,7 @@ function renderLog(role, lines) {
     sep.textContent = " · ";
     const warnSpan = document.createElement("span");
     warnSpan.className = "log-summary-warn";
-    warnSpan.textContent = `${warnCount} 警`;
+    warnSpan.textContent = `${warnCount} 警告`;
     summaryEl.append(sep, warnSpan);
   }
 
@@ -1582,7 +1580,7 @@ function renderTaskStatus(status) {
 
   if (effectiveStatus.status === "running") {
     if (!state.pollHandle) {
-      // First time we see this run — switch to "构建与运行" once, then start polling.
+      // First time we see this run: switch to the run tab once, then start polling.
       // Subsequent polls won't yank the user back if they navigate away.
       selectWorkflowTab("run");
       state.pollHandle = window.setInterval(refreshTaskStatus, 2000);
@@ -2270,7 +2268,6 @@ function installEvents() {
     fillCaseForm({
       id: freshId,
       canonicalPath: `input/input_parameter_${String(freshId).padStart(4, "0")}.toml`,
-      legacy_marker: 1,
       lam: 0.033333,
       Pe: 10,
       Pe2: 10,
@@ -2285,6 +2282,7 @@ function installEvents() {
       coeff_dt: 0.1,
       x_ini_posi: 5,
       alpha: 0.01,
+      Sc: 16667,
     });
     state.caseFormDirty = true;
   });

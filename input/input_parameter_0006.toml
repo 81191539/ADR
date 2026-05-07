@@ -1,4 +1,4 @@
-legacy_marker = 1
+case_id = 6
 lam = 0.033333
 Pe = 1000
 Pe2 = 1000
@@ -13,3 +13,4 @@ total_count = 100
 coeff_dt = 0.0353553
 x_ini_posi = 5
 alpha = 0.01
+Sc = 16667

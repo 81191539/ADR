@@ -34,7 +34,7 @@ namespace config {
      * @note 仅当 USE_CASE_LIST = true 时生效
      */
     inline std::vector<int> get_case_list() {
-        return {5};
+        return {1,2,3,4};
     }
     /** @} */
 
@@ -48,7 +48,7 @@ namespace config {
      * - true  = 忽略所有检查点，所有 case 从头开始计算
      * - false = 正常模式，存在检查点则恢复（默认）
      */
-    constexpr bool FORCE_RESTART_ALL = false;
+    constexpr bool FORCE_RESTART_ALL = true;
     /** @} */
 
     /**
@@ -114,18 +114,18 @@ namespace config {
     /** @} */
 
     /**
-     * @defgroup dense_dump_config Dense single-period MATLAB dump config
+     * @defgroup dense_dump_config Dense two-period MATLAB dump config
      * @{
      */
 
-    /** @brief Enable dense cc/ee dumps over one flow period after a global trigger time. */
+    /** @brief Enable dense cc/ee dumps over two flow periods after a global trigger time. */
     constexpr bool ENABLE_DENSE_DUMP = true;
 
-    /** @brief Global simulation time that starts the one-period dense sampling window. */
-    constexpr double T_DENSE_DUMP_START = 1.0;
+    /** @brief Global simulation time that starts the two-period dense sampling window. */
+    constexpr double T_DENSE_DUMP_START = 4.0;
 
-    /** @brief Number of snapshots across one period, including both endpoints. */
-    constexpr int DENSE_DUMP_COUNT = 8;
+    /** @brief Number of snapshots across two periods, including both endpoints. */
+    constexpr int DENSE_DUMP_COUNT = 16;
     /** @} */
 
     /**

@@ -1,7 +1,7 @@
 /*****************************************************************************
  * io.cpp
  * 
- * 数据输入输出功能实现
+ * 鏁版嵁杈撳叆杈撳嚭鍔熻兘瀹炵幇
  *****************************************************************************/
 
 #include "io.h"
@@ -17,11 +17,24 @@
 #include <filesystem>
 #include <map>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace fs = std::filesystem;
 
 namespace {
+
+int g_nonfinite_output_warnings = 0;
+
+void warn_nonfinite_output(const char* context, double value)
+{
+    if (g_nonfinite_output_warnings < 5) {
+        std::fprintf(stderr,
+                     "Warning: non-finite value (%g) encountered in output (%s)\n",
+                     value, context);
+    }
+    ++g_nonfinite_output_warnings;
+}
 
 std::runtime_error invalid_case(int case_number, const std::string& message)
 {
@@ -60,6 +73,7 @@ std::map<std::string, double> parse_toml_values(int case_number, std::istream& i
     std::map<std::string, double> values;
     std::string line;
     int line_number = 0;
+    std::string section;
 
     while (std::getline(in, line)) {
         ++line_number;
@@ -72,6 +86,15 @@ std::map<std::string, double> parse_toml_values(int case_number, std::istream& i
         if (stripped.empty()) {
             continue;
         }
+        if (stripped.front() == '[' && stripped.back() == ']') {
+            section = trim(stripped.substr(1, stripped.size() - 2));
+            if (section.empty()) {
+                throw invalid_case(case_number,
+                                   "invalid TOML line " + std::to_string(line_number) +
+                                   ": section name is required.");
+            }
+            continue;
+        }
 
         const auto eq_pos = stripped.find('=');
         if (eq_pos == std::string::npos) {
@@ -80,17 +103,92 @@ std::map<std::string, double> parse_toml_values(int case_number, std::istream& i
                                ": expected key = value.");
         }
 
-        const std::string key = trim(stripped.substr(0, eq_pos));
+        std::string key = trim(stripped.substr(0, eq_pos));
         const std::string raw_value = trim(stripped.substr(eq_pos + 1));
         if (key.empty() || raw_value.empty()) {
             throw invalid_case(case_number,
                                "invalid TOML line " + std::to_string(line_number) +
                                ": key and value are required.");
         }
+        if (!section.empty()) {
+            key = section + "." + key;
+        }
         values[key] = parse_number(case_number, key, raw_value);
     }
 
     return values;
+}
+
+struct TomlDocument {
+    std::map<std::string, double> numbers;
+    std::map<std::string, bool> booleans;
+};
+
+bool parse_toml_bool(int case_number, const std::string& name, const std::string& text)
+{
+    if (text == "true") {
+        return true;
+    }
+    if (text == "false") {
+        return false;
+    }
+    throw invalid_case(case_number, name + " must be true or false.");
+}
+
+TomlDocument parse_toml_document(int case_number, std::istream& in)
+{
+    TomlDocument document;
+    std::string line;
+    int line_number = 0;
+    std::string section;
+
+    while (std::getline(in, line)) {
+        ++line_number;
+        const auto comment_pos = line.find('#');
+        if (comment_pos != std::string::npos) {
+            line.erase(comment_pos);
+        }
+
+        const std::string stripped = trim(line);
+        if (stripped.empty()) {
+            continue;
+        }
+        if (stripped.front() == '[' && stripped.back() == ']') {
+            section = trim(stripped.substr(1, stripped.size() - 2));
+            if (section.empty()) {
+                throw invalid_case(case_number,
+                                   "invalid TOML line " + std::to_string(line_number) +
+                                   ": section name is required.");
+            }
+            continue;
+        }
+
+        const auto eq_pos = stripped.find('=');
+        if (eq_pos == std::string::npos) {
+            throw invalid_case(case_number,
+                               "invalid TOML line " + std::to_string(line_number) +
+                               ": expected key = value.");
+        }
+
+        std::string key = trim(stripped.substr(0, eq_pos));
+        const std::string raw_value = trim(stripped.substr(eq_pos + 1));
+        if (key.empty() || raw_value.empty()) {
+            throw invalid_case(case_number,
+                               "invalid TOML line " + std::to_string(line_number) +
+                               ": key and value are required.");
+        }
+        if (!section.empty()) {
+            key = section + "." + key;
+        }
+
+        if (raw_value == "true" || raw_value == "false") {
+            document.booleans[key] = parse_toml_bool(case_number, key, raw_value);
+        } else {
+            document.numbers[key] = parse_number(case_number, key, raw_value);
+        }
+    }
+
+    return document;
 }
 
 double require_toml_value(int case_number,
@@ -117,7 +215,8 @@ long require_toml_integer(int case_number,
 
 Params read_toml_parameter(int case_number, std::istream& in)
 {
-    const auto values = parse_toml_values(case_number, in);
+    const auto document = parse_toml_document(case_number, in);
+    const auto& values = document.numbers;
 
     Params p;
     p.lam = require_toml_value(case_number, values, "lam");
@@ -134,6 +233,10 @@ Params read_toml_parameter(int case_number, std::istream& in)
     p.coeff_dt = require_toml_value(case_number, values, "coeff_dt");
     p.x_ini_posi = require_toml_value(case_number, values, "x_ini_posi");
     p.alpha = require_toml_value(case_number, values, "alpha");
+    const auto sc = values.find("Sc");
+    if (sc != values.end()) {
+        p.Sc = sc->second;
+    }
     p.id = case_number;
     return p;
 }
@@ -176,6 +279,7 @@ void validate_parameter(int case_number, const Params& p)
     require_finite(case_number, "coeff_dt", p.coeff_dt);
     require_finite(case_number, "x_ini_posi", p.x_ini_posi);
     require_finite(case_number, "alpha", p.alpha);
+    require_finite(case_number, "Sc", p.Sc);
 
     if (p.lam <= 0.0) {
         throw invalid_case(case_number, "lam must be greater than 0.");
@@ -186,8 +290,15 @@ void validate_parameter(int case_number, const Params& p)
     if (p.K0 <= 0.0) {
         throw invalid_case(case_number, "K0 must be greater than 0.");
     }
-    if (p.alpha == 0.0) {
-        throw invalid_case(case_number, "alpha must not be 0.");
+    if (p.eps <= 0.0) {
+        throw invalid_case(case_number, "eps must be greater than 0.");
+    }
+    if (std::fabs(p.alpha) < 1e-12) {
+        throw invalid_case(case_number,
+                           "alpha is too close to 0 (|alpha| < 1e-12).");
+    }
+    if (p.Sc <= 0.0) {
+        throw invalid_case(case_number, "Sc must be greater than 0.");
     }
     if (p.total_count <= 0) {
         throw invalid_case(case_number, "total_count must be greater than 0.");
@@ -207,8 +318,7 @@ void validate_parameter(int case_number, const Params& p)
 }  // namespace
 
 //-----------------------------------------------------------------------------
-// 获取带输出目录前缀的路径
-//-----------------------------------------------------------------------------
+// 鑾峰彇甯﹁緭鍑虹洰褰曞墠缂€鐨勮矾寰?//-----------------------------------------------------------------------------
 static std::string get_output_path(const std::string& filename)
 {
     if (config::OUTPUT_DIR.empty()) {
@@ -220,49 +330,44 @@ static std::string get_output_path(const std::string& filename)
     return config::OUTPUT_DIR + "/" + filename;
 }
 
-//-----------------------------------------------------------------------------
-// 读取输入参数
-//-----------------------------------------------------------------------------
-Params read_parameter(int case_number)
+static fs::path find_input_parameter_file(int case_number)
 {
-    std::vector<std::string> patterns = {
+    const std::vector<std::string> patterns = {
         "input_parameter_%04d.toml",
         "input_parameter_%d.toml",
         "input_parameter_%03d.toml",
         "input_parameter_%02d.toml",
         "input_parameter_%05d.toml",
-        "input_parameter_%d.txt",      // 1
-        "input_parameter_%03d.txt",    // 001
-        "input_parameter_%02d.txt",     // 01
-        "input_parameter_%04d.txt",     // 0001
-        "input_parameter_%05d.txt"     // 00001
+        "input_parameter_%d.txt",
+        "input_parameter_%03d.txt",
+        "input_parameter_%02d.txt",
+        "input_parameter_%04d.txt",
+        "input_parameter_%05d.txt",
     };
-    
-    std::string filepath;
-    std::ifstream in;
-    bool found_file = false;
-    
+
     for (const auto& pat : patterns) {
         char buf[256];
         std::snprintf(buf, sizeof(buf), pat.c_str(), case_number);
-        
-        if (config::INPUT_DIR.empty()) {
-            filepath = buf;
-        } else {
-            filepath = config::INPUT_DIR + "/" + buf;
-        }
-        
-        in.open(filepath);
+
+        const fs::path filepath = config::INPUT_DIR.empty()
+                                ? fs::path(buf)
+                                : fs::path(config::INPUT_DIR) / buf;
+        std::ifstream in(filepath);
         if (in.is_open()) {
-            found_file = true;
-            break;  // 找到了
+            return filepath;
         }
-        in.clear();     // 清除错误状态
     }
-    
-    if (!found_file) {
-        throw invalid_case(case_number, "input parameter file was not found.");
-    }
+
+    throw invalid_case(case_number, "input parameter file was not found.");
+}
+
+//-----------------------------------------------------------------------------
+// 璇诲彇杈撳叆鍙傛暟
+//-----------------------------------------------------------------------------
+Params read_parameter(int case_number)
+{
+    const fs::path filepath = find_input_parameter_file(case_number);
+    std::ifstream in(filepath);
 
     Params p = fs::path(filepath).extension() == ".toml"
              ? read_toml_parameter(case_number, in)
@@ -272,8 +377,119 @@ Params read_parameter(int case_number)
     return p;
 }
 
+static bool toml_number(const TomlDocument& document,
+                        const std::string& key,
+                        double& value)
+{
+    const auto found = document.numbers.find(key);
+    if (found == document.numbers.end()) {
+        return false;
+    }
+    value = found->second;
+    return true;
+}
+
+static bool toml_bool(const TomlDocument& document,
+                      const std::string& key,
+                      bool& value)
+{
+    const auto found = document.booleans.find(key);
+    if (found == document.booleans.end()) {
+        return false;
+    }
+    value = found->second;
+    return true;
+}
+
+static long checked_positive_long(int case_number,
+                                  const std::string& key,
+                                  double value)
+{
+    if (!std::isfinite(value) || value <= 0.0 || std::floor(value) != value) {
+        throw invalid_case(case_number, key + " must be a positive integer.");
+    }
+    return static_cast<long>(value);
+}
+
+static int checked_nonnegative_int(int case_number,
+                                   const std::string& key,
+                                   double value)
+{
+    if (!std::isfinite(value) || value < 0.0 || std::floor(value) != value) {
+        throw invalid_case(case_number, key + " must be a non-negative integer.");
+    }
+    return static_cast<int>(value);
+}
+
+static double checked_nonnegative_double(int case_number,
+                                         const std::string& key,
+                                         double value)
+{
+    if (!std::isfinite(value) || value < 0.0) {
+        throw invalid_case(case_number, key + " must be a non-negative number.");
+    }
+    return value;
+}
+
+void apply_runtime_config_from_case(int case_number, ExecutionConfig& exec_config)
+{
+    const fs::path filepath = find_input_parameter_file(case_number);
+    if (filepath.extension() != ".toml") {
+        return;
+    }
+
+    std::ifstream in(filepath);
+    const TomlDocument document = parse_toml_document(case_number, in);
+
+    double number = 0.0;
+    bool boolean = false;
+
+    if (!exec_config.runtime_overrides.stats_interval &&
+        toml_number(document, "runtime.stats_interval", number)) {
+        exec_config.stats_interval =
+            checked_positive_long(case_number, "runtime.stats_interval", number);
+    }
+    if (!exec_config.runtime_overrides.stability_check_interval &&
+        toml_number(document, "runtime.stability_check_interval", number)) {
+        exec_config.stability_check_interval =
+            checked_positive_long(case_number, "runtime.stability_check_interval", number);
+    }
+    if (!exec_config.runtime_overrides.checkpoint_interval &&
+        toml_number(document, "runtime.checkpoint_interval", number)) {
+        exec_config.checkpoint_interval =
+            checked_positive_long(case_number, "runtime.checkpoint_interval", number);
+    }
+    if (!exec_config.runtime_overrides.dense_dump_start &&
+        toml_number(document, "runtime.dense_dump_start", number)) {
+        exec_config.dense_dump_start =
+            checked_nonnegative_double(case_number, "runtime.dense_dump_start", number);
+    }
+    if (!exec_config.runtime_overrides.dense_dump_count &&
+        toml_number(document, "runtime.dense_dump_count", number)) {
+        exec_config.dense_dump_count =
+            checked_nonnegative_int(case_number, "runtime.dense_dump_count", number);
+    }
+    if (!exec_config.runtime_overrides.convergence_threshold &&
+        toml_number(document, "runtime.convergence_threshold", number)) {
+        exec_config.convergence_threshold =
+            checked_nonnegative_double(case_number, "runtime.convergence_threshold", number);
+    }
+    if (!exec_config.runtime_overrides.enable_dense_dump &&
+        toml_bool(document, "runtime.enable_dense_dump", boolean)) {
+        exec_config.enable_dense_dump = boolean;
+    }
+    if (!exec_config.runtime_overrides.output_matlab &&
+        toml_bool(document, "runtime.output_matlab", boolean)) {
+        exec_config.output_matlab = boolean;
+    }
+    if (!exec_config.runtime_overrides.output_tecplot &&
+        toml_bool(document, "runtime.output_tecplot", boolean)) {
+        exec_config.output_tecplot = boolean;
+    }
+}
+
 //-----------------------------------------------------------------------------
-// 确保目录存在
+// 纭繚鐩綍瀛樺湪
 //-----------------------------------------------------------------------------
 void ensure_dir(const std::string& dir)
 {
@@ -283,7 +499,7 @@ void ensure_dir(const std::string& dir)
 }
 
 //-----------------------------------------------------------------------------
-// 输出浓度场和表面覆盖率数据（MATLAB 格式）
+// 杈撳嚭娴撳害鍦哄拰琛ㄩ潰瑕嗙洊鐜囨暟鎹紙MATLAB 鏍煎紡锛?
 //-----------------------------------------------------------------------------
 void print_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
                 int count, const char* buf,
@@ -303,14 +519,22 @@ void print_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
         SafeFile fphi(buffer_phi, "w");
         for (long i = 0; i <= nx; ++i) {
             for (long j = 0; j <= ny; ++j) {
-                fphi.printf("%s%16.14f ", " ", phi(i, j));
+                const double value = phi(i, j);
+                if (!std::isfinite(value)) {
+                    warn_nonfinite_output("cc", value);
+                }
+                fphi.printf("%s%16.14f ", " ", value);
             }
             fphi.puts("\n");
         }
 
         SafeFile feta(buffer_eta, "w");
         for (long i = 0; i <= nx; ++i) {
-            feta.printf(" %16.14f  %16.14f\n", xx(i), eta(i));
+            const double eta_value = eta(i);
+            if (!std::isfinite(eta_value)) {
+                warn_nonfinite_output("eta", eta_value);
+            }
+            feta.printf(" %16.14f  %16.14f\n", xx(i), eta_value);
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Error in print_data: %s\n", e.what());
@@ -318,7 +542,7 @@ void print_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
 }
 
 //-----------------------------------------------------------------------------
-// 输出 Tecplot 格式数据
+// 杈撳嚭 Tecplot 鏍煎紡鏁版嵁
 //-----------------------------------------------------------------------------
 void print_tecplot_data(const Field2D& cc, int count, const char* buf,
                         long nx, long ny, double h,
@@ -370,29 +594,33 @@ void print_tecplot_data(const Field2D& cc, int count, const char* buf,
 }
 
 //-----------------------------------------------------------------------------
-// 统一数据输出接口
+// 缁熶竴鏁版嵁杈撳嚭鎺ュ彛
 //-----------------------------------------------------------------------------
 void output_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
                  int count, const char* buf,
                  long nx, long ny, double h,
-                 double xleft, double yleft)
+                 double xleft, double yleft,
+                 bool output_matlab,
+                 bool output_tecplot)
 {
-    if (config::OUTPUT_MATLAB) {
+    if (output_matlab) {
         print_data(phi, eta, xx, count, buf, nx, ny);
     }
     
-    if (config::OUTPUT_TECPLOT) {
+    if (output_tecplot) {
         print_tecplot_data(phi, count, buf, nx, ny, h, xleft, yleft);
     }
 }
 
 //-----------------------------------------------------------------------------
-// 写入详细运行日志
+// 鍐欏叆璇︾粏杩愯鏃ュ織
 //-----------------------------------------------------------------------------
 void write_detailed_log(const char* fname_log, int case_number,
                         const Params& p, const GridInfo& grid,
                         const PhysicsParams& phys, const AdsorptionZone& zone,
-                        const RunLog& log, double dt_initial)
+                        const RunLog& log, double dt_initial,
+                        bool output_matlab,
+                        bool output_tecplot)
 {
     std::string full_path = get_output_path(fname_log);
     
@@ -564,11 +792,11 @@ void write_detailed_log(const char* fname_log, int case_number,
         
         fp.puts("%% -------------------- OUTPUT FILES --------------------\n");
         fp.printf("%% Data files are in: data_%d/\n", case_number);
-        if (config::OUTPUT_MATLAB) {
+        if (output_matlab) {
             fp.puts("%%   cc_N.m  - concentration field (MATLAB format)\n");
             fp.puts("%%   ee_N.m  - surface coverage (MATLAB format)\n");
         }
-        if (config::OUTPUT_TECPLOT) {
+        if (output_tecplot) {
             fp.puts("%%   cc_N.dat - concentration field (Tecplot format)\n");
         }
         fp.puts("%% \n");

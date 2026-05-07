@@ -44,7 +44,8 @@ public:
 
     bool has_unstable_values(SimFields& fields, const GridInfo& grid) override
     {
-        return ::has_unstable_values(fields.cc, grid.nx, grid.ny);
+        return ::has_unstable_values(fields.cc, grid.nx, grid.ny) ||
+               ::has_unstable_eta(fields.ee, grid.nx);
     }
 
     double compute_eta_average(SimFields& fields,

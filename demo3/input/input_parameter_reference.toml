@@ -1,0 +1,33 @@
+# Copy this file to input_parameter_XXXX.toml and change case_id/parameters.
+# This reference file is intentionally not numbered, so batch runs ignore it.
+
+case_id = 1
+lam = 0.033333
+Pe = 1000
+Pe2 = 0.1
+eps = 0.1
+Da = 100
+K0 = 1
+ny = 8
+xpo_l = 0.333333
+xpo_r = 0.666667
+endT = 0.002
+total_count = 1
+coeff_dt = 0.1
+x_ini_posi = 5
+alpha = 0.001
+Sc = 16667
+
+# Optional runtime overrides.
+# If omitted, defaults come from include/config.h.
+# If CLI flags set the same field, CLI values take precedence.
+[runtime]
+stats_interval = 1000
+stability_check_interval = 100
+checkpoint_interval = 50000
+output_matlab = true
+output_tecplot = false
+enable_dense_dump = true
+dense_dump_start = 1.0
+dense_dump_count = 8
+convergence_threshold = 0.001

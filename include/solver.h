@@ -45,6 +45,7 @@ void calc_phi(const Field2D& cc, Field2D& nc,
               long nx, long ny, double h);
 
 bool has_unstable_values(const Field2D& field, long nx, long ny);
+bool has_unstable_eta(const Field1D& eta, long nx);
 
 double compute_eta_average(const Field1D& eta,
                            const GridInfo& grid,

@@ -55,7 +55,9 @@
               <div class="action-row">
                 <button id="start-warmup-btn" class="accent-btn" type="button">Start Warmup</button>
                 <button id="stop-warmup-btn" class="ghost-btn" type="button" disabled>Stop</button>
-                <button id="apply-warmup-btn" class="ghost-btn" type="button" disabled>Apply Selected</button>
+                <label class="inline-control"><span>Manual</span><input id="warmup-manual-concurrency-input" type="number" min="0" step="1" placeholder="0 auto"></label>
+                <button id="apply-warmup-btn" class="ghost-btn" type="button" disabled>Apply</button>
+                <label class="checkbox-line warmup-skip-line"><input id="warmup-skip-checkbox" type="checkbox"><span>Skip warmup, use default auto</span></label>
               </div>
             </div>
             <div class="warmup-meta">
@@ -79,7 +81,7 @@
             <form id="case-form" class="form-grid">
               <section class="form-section"><header><h3>Identity</h3><span>case id</span></header><div class="form-section-body"><label><span>Case ID</span><input id="field-case-id" type="number" min="1" step="1"></label></div></section>
               <section class="form-section"><header><h3>Geometry / Mesh</h3><span>space grid</span></header><div class="form-section-body"><label><span>lam</span><input data-field="lam" type="number" step="any"></label><label><span>ny</span><input data-field="ny" type="number" min="1" step="1"></label><label><span>x_ini_posi</span><input data-field="x_ini_posi" type="number" step="any"></label></div></section>
-              <section class="form-section"><header><h3>Flow</h3><span>Pe / alpha</span></header><div class="form-section-body"><label><span>Pe</span><input data-field="Pe" type="number" step="any"></label><label><span>Pe2</span><input data-field="Pe2" type="number" step="any"></label><label><span>alpha</span><input data-field="alpha" type="number" step="any"></label></div></section>
+              <section class="form-section"><header><h3>Flow</h3><span>Pe / alpha</span></header><div class="form-section-body"><label><span>Pe</span><input data-field="Pe" type="number" step="any"></label><label><span>Pe2</span><input data-field="Pe2" type="number" step="any"></label><label><span>alpha</span><input data-field="alpha" type="number" step="any"></label><label><span>Sc</span><input data-field="Sc" type="number" min="1" step="any"></label></div></section>
               <section class="form-section"><header><h3>Reaction</h3><span>Da / K0</span></header><div class="form-section-body"><label><span>eps</span><input data-field="eps" type="number" step="any"></label><label><span>Da</span><input data-field="Da" type="number" step="any"></label><label><span>K0</span><input data-field="K0" type="number" step="any"></label></div></section>
               <section class="form-section"><header><h3>Adsorption Zone</h3><span>x in [0,1]</span></header><div class="form-section-body"><label><span>xpo_l</span><input data-field="xpo_l" type="number" min="0" max="1" step="any"></label><label><span>xpo_r</span><input data-field="xpo_r" type="number" min="0" max="1" step="any"></label></div></section>
               <section class="form-section"><header><h3>Time Integration</h3><span>explicit stepping</span></header><div class="form-section-body"><label><span>endT</span><input data-field="endT" type="number" min="0" step="any"></label><label><span>total_count</span><input data-field="total_count" type="number" min="1" step="1"></label><label><span>coeff_dt</span><input data-field="coeff_dt" type="number" min="0" step="any"></label></div></section>

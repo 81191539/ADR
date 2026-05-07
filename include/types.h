@@ -12,6 +12,12 @@
 #include <stdexcept>
 #include <vector>
 
+#include "config.h"
+
+#ifdef SC_DEFAULT
+#undef SC_DEFAULT
+#endif
+
 /**
  * @namespace phys
  * @brief Physical constants.
@@ -47,11 +53,33 @@ enum class ComputeBackend {
  * @brief Runtime execution settings shared by CPU and GPU entry points.
  */
 struct ExecutionConfig {
+    struct RuntimeOverrides {
+        bool stats_interval{false};
+        bool stability_check_interval{false};
+        bool checkpoint_interval{false};
+        bool output_matlab{false};
+        bool output_tecplot{false};
+        bool enable_dense_dump{false};
+        bool dense_dump_start{false};
+        bool dense_dump_count{false};
+        bool convergence_threshold{false};
+    };
+
     ComputeBackend backend{ComputeBackend::Cpu};
     int            device_id{0};
     bool           gpu_reduce_stats{true};
     std::vector<int> case_numbers;
     bool             force_restart{false};
+    long             stats_interval{config::STATS_INTERVAL};
+    long             stability_check_interval{config::STABILITY_CHECK_INTERVAL};
+    long             checkpoint_interval{config::CHECKPOINT_INTERVAL};
+    bool             output_matlab{config::OUTPUT_MATLAB};
+    bool             output_tecplot{config::OUTPUT_TECPLOT};
+    bool             enable_dense_dump{config::ENABLE_DENSE_DUMP};
+    double           dense_dump_start{config::T_DENSE_DUMP_START};
+    int              dense_dump_count{config::DENSE_DUMP_COUNT};
+    double           convergence_threshold{config::CONVERGENCE_THRESHOLD};
+    RuntimeOverrides runtime_overrides{};
     bool             benchmark_mode{false};
     int              benchmark_concurrency{1};
     std::vector<int> benchmark_case_numbers;
@@ -78,6 +106,7 @@ struct Params {
     long   total_count{};
     double coeff_dt{};
     double x_ini_posi{};
+    double Sc{sim::SC_DEFAULT};
     int    id{};
     double Pe1{};
     double f{};

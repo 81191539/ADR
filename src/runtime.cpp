@@ -14,9 +14,11 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <regex>
@@ -31,6 +33,15 @@ namespace fs = std::filesystem;
 
 namespace {
 
+void set_max_active_levels_if_supported(int levels)
+{
+#if defined(_OPENMP) && (!defined(_MSC_VER) || _OPENMP >= 200805)
+    omp_set_max_active_levels(levels);
+#else
+    (void)levels;
+#endif
+}
+
 void print_usage(const char* program)
 {
     std::cout << "Usage: " << program << " [--case N | --cases N[,M...]] [--force-restart]\n"
@@ -41,6 +52,15 @@ void print_usage(const char* program)
               << "  --case N          Run one case number.\n"
               << "  --cases A,B,C     Run a comma-separated case list.\n"
               << "  --force-restart   Ignore checkpoint files and start fresh.\n"
+              << "  --stats-interval N        Compute eta statistics every N iterations.\n"
+              << "  --stability-check-interval N  Check field stability every N iterations.\n"
+              << "  --checkpoint-interval N   Save checkpoints every N iterations.\n"
+              << "  --disable-dense-dump      Disable dense MATLAB snapshots.\n"
+              << "  --dense-dump-start T      Simulation time that starts dense snapshots.\n"
+              << "  --dense-dump-count N      Number of dense snapshots to write.\n"
+              << "  --convergence-threshold X Relative eta convergence threshold; 0 disables.\n"
+              << "  --output-matlab / --no-output-matlab    Enable or disable MATLAB field output.\n"
+              << "  --output-tecplot / --no-output-tecplot  Enable or disable Tecplot field output.\n"
               << "  --benchmark-concurrency N  Run CPU case-concurrency benchmark with N workers.\n"
               << "  --benchmark-cases A,B,C     Case parameter files used by benchmark workers.\n"
               << "  --benchmark-seconds S       Measurement duration in seconds.\n"
@@ -114,6 +134,60 @@ bool parse_positive_double(const std::string& text, double& value, std::string& 
     }
 }
 
+bool parse_positive_long(const std::string& text, long& value, std::string& error)
+{
+    try {
+        std::size_t parsed = 0;
+        const long long number = std::stoll(text, &parsed, 10);
+        if (parsed != text.size() ||
+            number <= 0 ||
+            number > std::numeric_limits<long>::max()) {
+            error = "Expected a positive integer: '" + text + "'.";
+            return false;
+        }
+        value = static_cast<long>(number);
+        return true;
+    } catch (const std::exception&) {
+        error = "Expected a positive integer: '" + text + "'.";
+        return false;
+    }
+}
+
+bool parse_nonnegative_int(const std::string& text, int& value, std::string& error)
+{
+    try {
+        std::size_t parsed = 0;
+        const long long number = std::stoll(text, &parsed, 10);
+        if (parsed != text.size() ||
+            number < 0 ||
+            number > std::numeric_limits<int>::max()) {
+            error = "Expected a non-negative integer: '" + text + "'.";
+            return false;
+        }
+        value = static_cast<int>(number);
+        return true;
+    } catch (const std::exception&) {
+        error = "Expected a non-negative integer: '" + text + "'.";
+        return false;
+    }
+}
+
+bool parse_nonnegative_double(const std::string& text, double& value, std::string& error)
+{
+    try {
+        std::size_t parsed = 0;
+        value = std::stod(text, &parsed);
+        if (parsed != text.size() || !std::isfinite(value) || value < 0.0) {
+            error = "Expected a non-negative number: '" + text + "'.";
+            return false;
+        }
+        return true;
+    } catch (const std::exception&) {
+        error = "Expected a non-negative number: '" + text + "'.";
+        return false;
+    }
+}
+
 bool parse_runtime_args(int argc, char* argv[],
                         ExecutionConfig& exec_config,
                         bool& show_help,
@@ -131,6 +205,90 @@ bool parse_runtime_args(int argc, char* argv[],
 
         if (arg == "--force-restart") {
             exec_config.force_restart = true;
+            continue;
+        }
+
+        if (arg == "--disable-dense-dump") {
+            exec_config.enable_dense_dump = false;
+            exec_config.runtime_overrides.enable_dense_dump = true;
+            continue;
+        }
+
+        if (arg == "--output-matlab") {
+            exec_config.output_matlab = true;
+            exec_config.runtime_overrides.output_matlab = true;
+            continue;
+        }
+
+        if (arg == "--no-output-matlab") {
+            exec_config.output_matlab = false;
+            exec_config.runtime_overrides.output_matlab = true;
+            continue;
+        }
+
+        if (arg == "--output-tecplot") {
+            exec_config.output_tecplot = true;
+            exec_config.runtime_overrides.output_tecplot = true;
+            continue;
+        }
+
+        if (arg == "--no-output-tecplot") {
+            exec_config.output_tecplot = false;
+            exec_config.runtime_overrides.output_tecplot = true;
+            continue;
+        }
+
+        if (arg == "--stats-interval" ||
+            arg == "--stability-check-interval" ||
+            arg == "--checkpoint-interval" ||
+            arg == "--dense-dump-start" ||
+            arg == "--dense-dump-count" ||
+            arg == "--convergence-threshold") {
+            if (i + 1 >= argc) {
+                error = arg + " requires a value.";
+                return false;
+            }
+
+            const std::string value = argv[++i];
+            if (arg == "--stats-interval") {
+                if (!parse_positive_long(value, exec_config.stats_interval, error)) {
+                    return false;
+                }
+                exec_config.runtime_overrides.stats_interval = true;
+            } else if (arg == "--stability-check-interval") {
+                if (!parse_positive_long(value,
+                                         exec_config.stability_check_interval,
+                                         error)) {
+                    return false;
+                }
+                exec_config.runtime_overrides.stability_check_interval = true;
+            } else if (arg == "--checkpoint-interval") {
+                if (!parse_positive_long(value, exec_config.checkpoint_interval, error)) {
+                    return false;
+                }
+                exec_config.runtime_overrides.checkpoint_interval = true;
+            } else if (arg == "--dense-dump-start") {
+                if (!parse_nonnegative_double(value,
+                                              exec_config.dense_dump_start,
+                                              error)) {
+                    return false;
+                }
+                exec_config.runtime_overrides.dense_dump_start = true;
+            } else if (arg == "--dense-dump-count") {
+                if (!parse_nonnegative_int(value,
+                                           exec_config.dense_dump_count,
+                                           error)) {
+                    return false;
+                }
+                exec_config.runtime_overrides.dense_dump_count = true;
+            } else {
+                if (!parse_nonnegative_double(value,
+                                              exec_config.convergence_threshold,
+                                              error)) {
+                    return false;
+                }
+                exec_config.runtime_overrides.convergence_threshold = true;
+            }
             continue;
         }
 
@@ -195,6 +353,66 @@ bool parse_runtime_args(int argc, char* argv[],
         const std::string benchmark_cases_prefix = "--benchmark-cases=";
         const std::string benchmark_seconds_prefix = "--benchmark-seconds=";
         const std::string benchmark_warmup_prefix = "--benchmark-warmup-seconds=";
+        const std::string stats_interval_prefix = "--stats-interval=";
+        const std::string stability_interval_prefix = "--stability-check-interval=";
+        const std::string checkpoint_interval_prefix = "--checkpoint-interval=";
+        const std::string dense_start_prefix = "--dense-dump-start=";
+        const std::string dense_count_prefix = "--dense-dump-count=";
+        const std::string convergence_prefix = "--convergence-threshold=";
+        if (arg.rfind(stats_interval_prefix, 0) == 0) {
+            if (!parse_positive_long(arg.substr(stats_interval_prefix.size()),
+                                     exec_config.stats_interval,
+                                     error)) {
+                return false;
+            }
+            exec_config.runtime_overrides.stats_interval = true;
+            continue;
+        }
+        if (arg.rfind(stability_interval_prefix, 0) == 0) {
+            if (!parse_positive_long(arg.substr(stability_interval_prefix.size()),
+                                     exec_config.stability_check_interval,
+                                     error)) {
+                return false;
+            }
+            exec_config.runtime_overrides.stability_check_interval = true;
+            continue;
+        }
+        if (arg.rfind(checkpoint_interval_prefix, 0) == 0) {
+            if (!parse_positive_long(arg.substr(checkpoint_interval_prefix.size()),
+                                     exec_config.checkpoint_interval,
+                                     error)) {
+                return false;
+            }
+            exec_config.runtime_overrides.checkpoint_interval = true;
+            continue;
+        }
+        if (arg.rfind(dense_start_prefix, 0) == 0) {
+            if (!parse_nonnegative_double(arg.substr(dense_start_prefix.size()),
+                                          exec_config.dense_dump_start,
+                                          error)) {
+                return false;
+            }
+            exec_config.runtime_overrides.dense_dump_start = true;
+            continue;
+        }
+        if (arg.rfind(dense_count_prefix, 0) == 0) {
+            if (!parse_nonnegative_int(arg.substr(dense_count_prefix.size()),
+                                       exec_config.dense_dump_count,
+                                       error)) {
+                return false;
+            }
+            exec_config.runtime_overrides.dense_dump_count = true;
+            continue;
+        }
+        if (arg.rfind(convergence_prefix, 0) == 0) {
+            if (!parse_nonnegative_double(arg.substr(convergence_prefix.size()),
+                                          exec_config.convergence_threshold,
+                                          error)) {
+                return false;
+            }
+            exec_config.runtime_overrides.convergence_threshold = true;
+            continue;
+        }
         if (arg.rfind(benchmark_concurrency_prefix, 0) == 0) {
             int concurrency = 0;
             if (!parse_case_number(arg.substr(benchmark_concurrency_prefix.size()),
@@ -263,7 +481,7 @@ struct DenseDumpRecord {
     double sim_time{};
 };
 
-fs::path dense_dump_dir(int case_number)
+fs::path dense_dump_root_dir(int case_number)
 {
     char dirname[64];
     std::snprintf(dirname, sizeof(dirname), "data_%d_dense", case_number);
@@ -274,9 +492,51 @@ fs::path dense_dump_dir(int case_number)
     return fs::path(config::OUTPUT_DIR) / dirname;
 }
 
-bool is_dense_dump_file(const fs::path& path)
+std::string local_timestamp()
 {
-    static const std::regex dense_file_pattern(R"(^((cc|ee)_[0-9]+|times)\.m$)");
+    const std::time_t now = std::time(nullptr);
+    std::tm local_time{};
+#if defined(_WIN32)
+    localtime_s(&local_time, &now);
+#else
+    localtime_r(&now, &local_time);
+#endif
+
+    char buffer[32];
+    std::strftime(buffer, sizeof(buffer), "%Y%m%d_%H%M%S", &local_time);
+    return buffer;
+}
+
+fs::path create_dense_dump_run_dir(const fs::path& root_dir)
+{
+    ensure_dir(root_dir.string());
+
+    const std::string timestamp = local_timestamp();
+    for (int suffix = 0; suffix < 1000; ++suffix) {
+        fs::path candidate = root_dir / ("run_" + timestamp +
+                                         (suffix == 0 ? "" : "_" + std::to_string(suffix + 1)));
+        std::error_code error;
+        if (fs::create_directory(candidate, error)) {
+            return candidate;
+        }
+        if (error) {
+            throw std::runtime_error("Could not create dense dump run directory '" +
+                                     candidate.string() + "': " + error.message());
+        }
+        if (!fs::exists(candidate)) {
+            throw std::runtime_error("Could not create dense dump run directory '" +
+                                     candidate.string() + "'.");
+        }
+    }
+
+    throw std::runtime_error("Could not create a unique dense dump run directory under '" +
+                             root_dir.string() + "'.");
+}
+
+bool is_current_dense_dump_file(const fs::path& path)
+{
+    static const std::regex dense_file_pattern(
+        R"(^((cc|ee)_[0-9]+_t[-+0-9.eE]+_it[0-9]+|times)\.m$)");
     return std::regex_match(path.filename().string(), dense_file_pattern);
 }
 
@@ -285,7 +545,7 @@ void prepare_dense_dump_directory(const fs::path& dir)
     ensure_dir(dir.string());
 
     for (const auto& entry : fs::directory_iterator(dir)) {
-        if (!entry.is_regular_file() || !is_dense_dump_file(entry.path())) {
+        if (!entry.is_regular_file() || !is_current_dense_dump_file(entry.path())) {
             continue;
         }
 
@@ -298,16 +558,34 @@ void prepare_dense_dump_directory(const fs::path& dir)
     }
 }
 
+std::string dense_time_token(double sim_time)
+{
+    std::ostringstream stream;
+    stream << std::setprecision(9) << sim_time;
+    std::string token = stream.str();
+    for (char& ch : token) {
+        if (ch == '+') {
+            ch = 'p';
+        }
+    }
+    return token;
+}
+
 bool dump_dense_snapshot(const fs::path& dir,
                          const Field2D& cc,
                          const Field1D& ee,
                          const Field1D& xx,
                          int index,
+                         long iteration,
+                         double sim_time,
                          long nx,
                          long ny)
 {
-    const fs::path cc_path = dir / ("cc_" + std::to_string(index) + ".m");
-    const fs::path ee_path = dir / ("ee_" + std::to_string(index) + ".m");
+    const std::string suffix = "_" + std::to_string(index) +
+                               "_t" + dense_time_token(sim_time) +
+                               "_it" + std::to_string(iteration) + ".m";
+    const fs::path cc_path = dir / ("cc" + suffix);
+    const fs::path ee_path = dir / ("ee" + suffix);
 
     try {
         SafeFile fcc(cc_path.string(), "w");
@@ -337,8 +615,12 @@ void write_dense_times_index(const fs::path& dir,
     try {
         SafeFile fp((dir / "times.m").string(), "w");
         for (const auto& record : records) {
-            fp.printf(" %d %ld %.17g\n",
-                      record.index, record.iteration, record.sim_time);
+            const std::string suffix = "_" + std::to_string(record.index) +
+                                       "_t" + dense_time_token(record.sim_time) +
+                                       "_it" + std::to_string(record.iteration) + ".m";
+            fp.printf(" %d %ld %.17g cc%s ee%s\n",
+                      record.index, record.iteration, record.sim_time,
+                      suffix.c_str(), suffix.c_str());
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "Error writing dense dump times index: %s\n", e.what());
@@ -406,13 +688,49 @@ PreparedCase prepare_case_for_benchmark(const Params& p)
     prepared.phys.K0 = p.K0;
     prepared.phys.c0 = 1.0;
     prepared.phys.alpha = p.alpha;
-    prepared.phys.Sc = sim::SC_DEFAULT;
+    prepared.phys.Sc = p.Sc;
 
     prepared.zone.xpo_l = p.xpo_l * xright;
     prepared.zone.xpo_r = p.xpo_r * xright;
     prepared.dt = p.coeff_dt * h * h;
     prepared.x_ini_posi = p.x_ini_posi;
     return prepared;
+}
+
+double percentile_value(std::vector<double> values, double percentile)
+{
+    if (values.empty()) {
+        return 0.0;
+    }
+    std::sort(values.begin(), values.end());
+    const double clamped = std::max(0.0, std::min(1.0, percentile));
+    const std::size_t index = static_cast<std::size_t>(
+        std::ceil(clamped * static_cast<double>(values.size())) - 1.0);
+    return values[std::min(index, values.size() - 1)];
+}
+
+void print_json_number_array(const std::vector<double>& values)
+{
+    std::cout << "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            std::cout << ",";
+        }
+        std::cout << values[i];
+    }
+    std::cout << "]";
+}
+
+void print_json_integer_array(const std::vector<long long>& values)
+{
+    std::cout << "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            std::cout << ",";
+        }
+        std::cout << values[i];
+    }
+    std::cout << "]";
 }
 
 int run_benchmark(const ExecutionConfig& exec_config)
@@ -437,53 +755,116 @@ int run_benchmark(const ExecutionConfig& exec_config)
         cases.push_back(prepare_case_for_benchmark(read_parameter(case_number)));
     }
 
-    omp_set_max_active_levels(1);
-    double total_iterations = 0.0;
+    set_max_active_levels_if_supported(1);
+    std::vector<long long> worker_iterations(static_cast<std::size_t>(concurrency), 0);
     const double warmup_start = omp_get_wtime();
     const double warmup_end = warmup_start + exec_config.benchmark_warmup_seconds;
     const double measure_end = warmup_end + exec_config.benchmark_seconds;
 
-    #pragma omp parallel num_threads(concurrency) reduction(+:total_iterations)
+    #pragma omp parallel num_threads(concurrency)
     {
         const int thread_id = omp_get_thread_num();
-        const PreparedCase& prepared =
-            cases[static_cast<std::size_t>(thread_id) % cases.size()];
         auto backend = create_cpu_backend();
-        SimFields fields;
-        fields.resize(prepared.grid.nx, prepared.grid.ny);
-        fields.zero_all();
-        backend->initialize(fields, prepared.grid, prepared.x_ini_posi);
 
-        long local_iterations = 0;
+        std::vector<const PreparedCase*> assigned_cases;
+        for (std::size_t index = static_cast<std::size_t>(thread_id);
+             index < cases.size();
+             index += static_cast<std::size_t>(concurrency)) {
+            assigned_cases.push_back(&cases[index]);
+        }
+
+        std::vector<SimFields> fields(assigned_cases.size());
+        std::vector<long> case_iterations(assigned_cases.size(), 0);
+        for (std::size_t i = 0; i < assigned_cases.size(); ++i) {
+            const PreparedCase& prepared = *assigned_cases[i];
+            fields[i].resize(prepared.grid.nx, prepared.grid.ny);
+            fields[i].zero_all();
+            backend->initialize(fields[i], prepared.grid, prepared.x_ini_posi);
+        }
+
+        long long local_iterations = 0;
+        std::size_t cursor = 0;
+        bool measuring = false;
         double now = omp_get_wtime();
         while (now < measure_end) {
-            backend->full_step_explicit(fields, prepared.grid, prepared.phys,
-                                        prepared.zone,
-                                        static_cast<double>(local_iterations + 1) *
-                                            prepared.dt,
-                                        prepared.dt);
-            ++local_iterations;
+            if (assigned_cases.empty()) {
+                now = omp_get_wtime();
+                continue;
+            }
+
+            const std::size_t case_index = cursor % assigned_cases.size();
+            const PreparedCase& prepared = *assigned_cases[case_index];
+            ++case_iterations[case_index];
+            backend->full_step_explicit(
+                fields[case_index],
+                prepared.grid,
+                prepared.phys,
+                prepared.zone,
+                static_cast<double>(case_iterations[case_index]) * prepared.dt,
+                prepared.dt);
+            ++cursor;
             now = omp_get_wtime();
             if (now < warmup_end) {
+                continue;
+            }
+            if (!measuring) {
+                measuring = true;
                 local_iterations = 0;
             }
+            ++local_iterations;
         }
-        total_iterations += static_cast<double>(local_iterations);
+        worker_iterations[static_cast<std::size_t>(thread_id)] = local_iterations;
     }
 
+    long long total_iteration_count = 0;
+    std::vector<double> worker_throughputs;
+    std::vector<double> worker_seconds_per_case;
+    worker_throughputs.reserve(worker_iterations.size());
+    worker_seconds_per_case.reserve(worker_iterations.size());
+    for (long long iterations : worker_iterations) {
+        total_iteration_count += iterations;
+        const double throughput =
+            static_cast<double>(iterations) / exec_config.benchmark_seconds;
+        worker_throughputs.push_back(throughput);
+        if (throughput > 0.0) {
+            worker_seconds_per_case.push_back(1.0 / throughput);
+        } else {
+            worker_seconds_per_case.push_back(exec_config.benchmark_seconds);
+        }
+    }
+
+    const double total_iterations = static_cast<double>(total_iteration_count);
     const double total_throughput =
         total_iterations / exec_config.benchmark_seconds;
     const double per_worker_throughput = total_throughput / concurrency;
+    const double worker_min = worker_throughputs.empty()
+        ? 0.0
+        : *std::min_element(worker_throughputs.begin(), worker_throughputs.end());
+    const double worker_median = percentile_value(worker_throughputs, 0.50);
+    const double worker_p90 = percentile_value(worker_throughputs, 0.90);
+    const double worker_slowest = worker_min;
+    const double tail_p90_seconds = percentile_value(worker_seconds_per_case, 0.90);
 
     std::cout << "{\"benchmark\":true"
               << ",\"concurrency\":" << concurrency
+              << ",\"worker_count\":" << concurrency
               << ",\"logical_processors\":" << logical_processors
               << ",\"sample_cases\":" << cases.size()
+              << ",\"sample_case_count\":" << cases.size()
               << ",\"warmup_seconds\":" << exec_config.benchmark_warmup_seconds
               << ",\"measurement_seconds\":" << exec_config.benchmark_seconds
-              << ",\"total_iterations\":" << static_cast<long long>(total_iterations)
+              << ",\"total_iterations\":" << total_iteration_count
               << ",\"iterations_per_second\":" << total_throughput
               << ",\"iterations_per_second_per_worker\":" << per_worker_throughput
+              << ",\"worker_iterations\":";
+    print_json_integer_array(worker_iterations);
+    std::cout << ",\"worker_iterations_per_second\":";
+    print_json_number_array(worker_throughputs);
+    std::cout << ",\"worker_throughput_min\":" << worker_min
+              << ",\"worker_throughput_median\":" << worker_median
+              << ",\"worker_throughput_p90\":" << worker_p90
+              << ",\"worker_throughput_slowest\":" << worker_slowest
+              << ",\"tail_p90_seconds_per_case\":" << tail_p90_seconds
               << "}" << std::endl;
 
     return EXIT_SUCCESS;
@@ -535,7 +916,7 @@ void case_calculation(int case_number, Params p,
     phys.K0 = p.K0;
     phys.c0 = 1.0;
     phys.alpha = p.alpha;
-    phys.Sc = sim::SC_DEFAULT;
+    phys.Sc = p.Sc;
 
     AdsorptionZone zone;
     zone.xpo_l = xl;
@@ -563,10 +944,13 @@ void case_calculation(int case_number, Params p,
     }
 
     const bool dense_dump_enabled =
-        config::ENABLE_DENSE_DUMP && config::DENSE_DUMP_COUNT > 0;
+        exec_config.enable_dense_dump && exec_config.dense_dump_count > 0;
     const double dense_period =
-        phys::PI / (phys.alpha * phys.alpha * phys.Sc);
-    const fs::path dense_dir = dense_dump_dir(case_number);
+        2.0 * phys::PI / (phys.alpha * phys.alpha * phys.Sc);
+    const fs::path dense_root_dir = dense_dump_root_dir(case_number);
+    const fs::path dense_dir = dense_dump_enabled
+                             ? create_dense_dump_run_dir(dense_root_dir)
+                             : fs::path{};
     std::vector<DenseDumpRecord> dense_times;
     std::vector<long> dense_target_offsets;
     int dense_dump_count = 0;
@@ -606,14 +990,14 @@ void case_calculation(int case_number, Params p,
 
     auto record_dense_snapshot = [&](long iteration) {
         if (!dense_dump_enabled ||
-            dense_dump_count >= config::DENSE_DUMP_COUNT) {
+            dense_dump_count >= exec_config.dense_dump_count) {
             return;
         }
 
         const double io_start = omp_get_wtime();
         backend->sync_host(fields);
         if (dump_dense_snapshot(dense_dir, fields.cc, fields.ee, fields.xx,
-                                dense_dump_count, nx, p.ny)) {
+                                dense_dump_count, iteration, ct, nx, p.ny)) {
             dense_times.push_back({dense_dump_count, iteration, ct});
             ++dense_dump_count;
         }
@@ -625,7 +1009,7 @@ void case_calculation(int case_number, Params p,
         dense_anchor_iteration = iteration;
         dense_next_target = 0;
         dense_target_offsets = make_dense_target_offsets(
-            config::DENSE_DUMP_COUNT, dense_period / dt);
+            exec_config.dense_dump_count, dense_period / dt);
     };
 
     auto record_due_dense_snapshots = [&](long iteration) {
@@ -634,7 +1018,7 @@ void case_calculation(int case_number, Params p,
         }
 
         while (dense_next_target < dense_target_offsets.size() &&
-               dense_dump_count < config::DENSE_DUMP_COUNT &&
+               dense_dump_count < exec_config.dense_dump_count &&
                iteration >= dense_anchor_iteration +
                             dense_target_offsets[dense_next_target]) {
             record_dense_snapshot(iteration);
@@ -644,11 +1028,11 @@ void case_calculation(int case_number, Params p,
 
     auto dense_snapshot_due = [&](long iteration) {
         if (!dense_dump_enabled ||
-            dense_dump_count >= config::DENSE_DUMP_COUNT) {
+            dense_dump_count >= exec_config.dense_dump_count) {
             return false;
         }
         if (!dense_dump_active) {
-            return ct + sim::EPS_EPOCH >= config::T_DENSE_DUMP_START;
+            return ct + sim::EPS_EPOCH >= exec_config.dense_dump_start;
         }
         return dense_next_target < dense_target_offsets.size() &&
                iteration >= dense_anchor_iteration +
@@ -726,7 +1110,15 @@ void case_calculation(int case_number, Params p,
         last_completed_iteration = 0;
         last_milestone = -1;
         reset_dense_dump();
-        if (config::T_DENSE_DUMP_START <= 0.0) {
+
+        try {
+            SafeFile fp(fname_eta, "w");
+            fp.printf(" %f  %f %f\n", 0.0, 0.0, 0.0);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "Error resetting eta file after restart: %s\n", e.what());
+        }
+
+        if (exec_config.dense_dump_start <= 0.0) {
             start_dense_window(0);
             record_due_dense_snapshots(0);
         }
@@ -735,8 +1127,8 @@ void case_calculation(int case_number, Params p,
 
     auto check_stability = [&](long iteration, bool force) {
         const bool scheduled =
-            config::STABILITY_CHECK_INTERVAL <= 1 ||
-            iteration % config::STABILITY_CHECK_INTERVAL == 0;
+            exec_config.stability_check_interval <= 1 ||
+            iteration % exec_config.stability_check_interval == 0;
         if (!force && !scheduled) {
             return false;
         }
@@ -753,10 +1145,12 @@ void case_calculation(int case_number, Params p,
 
     backend->sync_host(fields);
     output_data(fields.cc, fields.ee, fields.xx, 0, fname_data,
-                nx, p.ny, h, xleft, yleft);
+                nx, p.ny, h, xleft, yleft,
+                exec_config.output_matlab,
+                exec_config.output_tecplot);
     if (dense_dump_enabled &&
-        (config::T_DENSE_DUMP_START <= 0.0 ||
-         ct + sim::EPS_EPOCH >= config::T_DENSE_DUMP_START)) {
+        (exec_config.dense_dump_start <= 0.0 ||
+         ct + sim::EPS_EPOCH >= exec_config.dense_dump_start)) {
         start_dense_window(last_completed_iteration);
         record_due_dense_snapshots(last_completed_iteration);
     }
@@ -767,7 +1161,18 @@ void case_calculation(int case_number, Params p,
         backend->full_step_explicit(fields, grid, phys, zone, ct, dt);
         last_completed_iteration = it;
 
-        if (check_stability(it, false)) {
+        const bool stats_due = (it % exec_config.stats_interval == 0);
+        const bool output_due = (it % ns == 0);
+        const bool dense_block_enabled =
+            dense_dump_enabled &&
+            (!dense_dump_active ||
+             dense_next_target < dense_target_offsets.size());
+        const bool dense_due =
+            dense_block_enabled && dense_snapshot_due(it);
+        const bool checkpoint_due =
+            (it % exec_config.checkpoint_interval == 0);
+
+        if (check_stability(it, stats_due || output_due || dense_due || checkpoint_due)) {
             it = 0;
             continue;
         }
@@ -775,19 +1180,25 @@ void case_calculation(int case_number, Params p,
             break;
         }
 
-        if (it % config::STATS_INTERVAL == 0) {
-            if (check_stability(it, true)) {
-                it = 0;
-                continue;
-            }
-            if (stability_abort) {
-                break;
-            }
-
+        if (stats_due) {
             old_eta = eta_ave;
             eta_ave = backend->compute_eta_average(fields, grid, zone);
             eta_ave_dt =
-                (eta_ave - old_eta) / dt / static_cast<double>(config::STATS_INTERVAL);
+                (eta_ave - old_eta) / dt /
+                static_cast<double>(exec_config.stats_interval);
+
+            if (!std::isfinite(eta_ave) || !std::isfinite(eta_ave_dt)) {
+                std::fprintf(stderr,
+                             "Warning: non-finite eta output at t=%g (eta_ave=%g, d/dt=%g)\n",
+                             ct, eta_ave, eta_ave_dt);
+                if (handle_unstable_state(it)) {
+                    it = 0;
+                    continue;
+                }
+                if (stability_abort) {
+                    break;
+                }
+            }
 
             try {
                 SafeFile fp(fname_eta, "a");
@@ -831,8 +1242,8 @@ void case_calculation(int case_number, Params p,
                 }
             }
 
-            if (config::CONVERGENCE_THRESHOLD > 0 &&
-                rel_err < config::CONVERGENCE_THRESHOLD) {
+            if (exec_config.convergence_threshold > 0 &&
+                rel_err < exec_config.convergence_threshold) {
                 run_log.converged = true;
                 run_log.final_eta = eta_ave;
                 run_log.final_rel_err = rel_err;
@@ -857,58 +1268,35 @@ void case_calculation(int case_number, Params p,
                 const double io_start = omp_get_wtime();
                 backend->sync_host(fields);
                 output_data(fields.cc, fields.ee, fields.xx, count + 1000, fname_data,
-                            nx, p.ny, h, xleft, yleft);
+                            nx, p.ny, h, xleft, yleft,
+                            exec_config.output_matlab,
+                            exec_config.output_tecplot);
                 run_log.time_io += omp_get_wtime() - io_start;
 
                 break;
             }
         }
 
-        if (it % ns == 0) {
-            if (check_stability(it, true)) {
-                it = 0;
-                continue;
-            }
-            if (stability_abort) {
-                break;
-            }
-
+        if (output_due) {
             const double io_start = omp_get_wtime();
             backend->sync_host(fields);
             output_data(fields.cc, fields.ee, fields.xx, count, fname_data,
-                        nx, p.ny, h, xleft, yleft);
+                        nx, p.ny, h, xleft, yleft,
+                        exec_config.output_matlab,
+                        exec_config.output_tecplot);
             run_log.time_io += omp_get_wtime() - io_start;
             ++count;
         }
 
-        if (dense_dump_enabled &&
-            (!dense_dump_active ||
-             dense_next_target < dense_target_offsets.size())) {
-            if (dense_snapshot_due(it)) {
-                if (check_stability(it, true)) {
-                    it = 0;
-                    continue;
-                }
-                if (stability_abort) {
-                    break;
-                }
-            }
+        if (dense_block_enabled) {
             if (!dense_dump_active &&
-                ct + sim::EPS_EPOCH >= config::T_DENSE_DUMP_START) {
+                ct + sim::EPS_EPOCH >= exec_config.dense_dump_start) {
                 start_dense_window(it);
             }
             record_due_dense_snapshots(it);
         }
 
-        if (it % config::CHECKPOINT_INTERVAL == 0) {
-            if (check_stability(it, true)) {
-                it = 0;
-                continue;
-            }
-            if (stability_abort) {
-                break;
-            }
-
+        if (checkpoint_due) {
             Checkpoint chkpt;
             chkpt.iteration = it;
             chkpt.sim_time = ct;
@@ -955,7 +1343,9 @@ void case_calculation(int case_number, Params p,
         write_dense_times_index(dense_dir, dense_times);
     }
 
-    write_detailed_log(fname_log, case_number, p, grid, phys, zone, run_log, dt_initial);
+    write_detailed_log(fname_log, case_number, p, grid, phys, zone, run_log, dt_initial,
+                       exec_config.output_matlab,
+                       exec_config.output_tecplot);
 }
 
 }  // namespace
@@ -991,7 +1381,7 @@ int run_cases(const ExecutionConfig& exec_config)
         } else {
             omp_set_num_threads(std::max(1, omp_get_max_threads()));
         }
-        omp_set_max_active_levels(1);
+        set_max_active_levels_if_supported(1);
     }
 
     std::cout << "========================================" << std::endl;
@@ -1078,9 +1468,11 @@ int run_cases(const ExecutionConfig& exec_config)
         for (long idx = 0; idx < static_cast<long>(case_numbers.size()); ++idx) {
             const int case_no = case_numbers[static_cast<std::size_t>(idx)];
             Params p;
+            ExecutionConfig case_exec_config = exec_config;
 
             try {
                 p = read_parameter(case_no);
+                apply_runtime_config_from_case(case_no, case_exec_config);
             } catch (const std::exception& e) {
                 #pragma omp critical
                 {
@@ -1098,7 +1490,7 @@ int run_cases(const ExecutionConfig& exec_config)
             case_calculation(case_no, p,
                              static_cast<int>(idx),
                              static_cast<int>(case_numbers.size()),
-                             exec_config);
+                             case_exec_config);
             #pragma omp atomic
             completed_cases++;
         }
@@ -1106,9 +1498,11 @@ int run_cases(const ExecutionConfig& exec_config)
         for (std::size_t idx = 0; idx < case_numbers.size(); ++idx) {
             const int case_no = case_numbers[idx];
             Params p;
+            ExecutionConfig case_exec_config = exec_config;
 
             try {
                 p = read_parameter(case_no);
+                apply_runtime_config_from_case(case_no, case_exec_config);
             } catch (const std::exception& e) {
                 std::fprintf(stderr, "[Case %d] Error: %s\n", case_no, e.what());
                 ++failed_cases;
@@ -1118,7 +1512,7 @@ int run_cases(const ExecutionConfig& exec_config)
             case_calculation(case_no, p,
                              static_cast<int>(idx),
                              static_cast<int>(case_numbers.size()),
-                             exec_config);
+                             case_exec_config);
             ++completed_cases;
         }
     }

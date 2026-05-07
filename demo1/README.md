@@ -155,7 +155,22 @@ The current tests cover ghost-cell storage behavior, a basic finite-state CPU ex
 
 ## Encoding
 
-Source files and docs are UTF-8. If Chinese comments display as mojibake in PowerShell, switch the terminal to UTF-8, for example with `chcp 65001` or `$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()`. Do not convert repository files to a legacy code page.
+Source files and docs are UTF-8. The checked-in `.editorconfig` and root `.gitattributes` keep text files on UTF-8/LF, while `.bat` and `.cmd` files stay CRLF for Windows.
+
+On Windows, launch the Web UI through the provided `.bat` files so `chcp 65001`, `PYTHONUTF8=1`, and `PYTHONIOENCODING=utf-8` are set consistently. If Chinese comments display as mojibake in an interactive PowerShell session, run:
+
+```powershell
+chcp 65001
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+```
+
+Check the repository from the project root with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\check_encoding.ps1
+```
+
+Do not convert repository files to GBK/ANSI or use legacy PowerShell redirection to rewrite source files.
 
 ## Improvement Notes
 

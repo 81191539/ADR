@@ -20,6 +20,14 @@
 Params read_parameter(int case_number);
 
 /**
+ * @brief Apply optional [runtime] TOML settings for a case.
+ *
+ * CLI-provided values in ExecutionConfig take precedence over case TOML.
+ * Legacy .txt case files do not carry runtime settings and leave config unchanged.
+ */
+void apply_runtime_config_from_case(int case_number, ExecutionConfig& exec_config);
+
+/**
  * @brief 输出浓度场和表面覆盖率数据（MATLAB 格式）
  * 
  * 输出文件：
@@ -73,7 +81,9 @@ void print_tecplot_data(const Field2D& cc, int count, const char* buf,
 void output_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
                  int count, const char* buf,
                  long nx, long ny, double h,
-                 double xleft, double yleft);
+                 double xleft, double yleft,
+                 bool output_matlab = config::OUTPUT_MATLAB,
+                 bool output_tecplot = config::OUTPUT_TECPLOT);
 
 /**
  * @brief 写入详细运行日志
@@ -92,7 +102,9 @@ void output_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
 void write_detailed_log(const char* fname_log, int case_number,
                         const Params& p, const GridInfo& grid,
                         const PhysicsParams& phys, const AdsorptionZone& zone,
-                        const RunLog& log, double dt_initial);
+                        const RunLog& log, double dt_initial,
+                        bool output_matlab = config::OUTPUT_MATLAB,
+                        bool output_tecplot = config::OUTPUT_TECPLOT);
 
 /**
  * @brief 确保目录存在

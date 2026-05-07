@@ -112,15 +112,17 @@
                   <tr>
                     <th>并发数</th>
                     <th>总吞吐</th>
-                    <th>单 case 平均</th>
-                    <th>预计耗时</th>
-                    <th>相对最佳</th>
-                    <th>耗时</th>
+                    <th>worker min</th>
+                    <th>worker median</th>
+                    <th>worker p90</th>
+                    <th>slowest worker</th>
+                    <th>p90 tail 预计</th>
+                    <th>样本数</th>
                     <th>状态</th>
                   </tr>
                 </thead>
                 <tbody id="warmup-results-body">
-                  <tr><td colspan="7">还没有预热结果。</td></tr>
+                  <tr><td colspan="9">还没有预热结果。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -170,6 +172,7 @@
                   <label><span>Pe</span><input data-field="Pe" type="number" step="any"></label>
                   <label><span>Pe2</span><input data-field="Pe2" type="number" step="any"></label>
                   <label><span>alpha</span><input data-field="alpha" type="number" step="any"></label>
+                  <label><span>Sc</span><input data-field="Sc" type="number" min="1" step="any"></label>
                 </div>
               </section>
 

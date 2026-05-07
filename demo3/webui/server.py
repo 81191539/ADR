@@ -12,6 +12,7 @@ import shutil
 import shlex
 import subprocess
 import threading
+import time
 import webbrowser
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -80,6 +81,22 @@ PARAM_SPECS = [
     ("alpha", float),
 ]
 
+OPTIONAL_PARAM_SPECS = [
+    ("Sc", float, 16667.0),
+]
+
+RUNTIME_SPECS: dict[str, tuple[type, Any]] = {
+    "stats_interval": (int, None),
+    "stability_check_interval": (int, None),
+    "checkpoint_interval": (int, None),
+    "enable_dense_dump": (bool, None),
+    "dense_dump_start": (float, None),
+    "dense_dump_count": (int, None),
+    "convergence_threshold": (float, None),
+    "output_matlab": (bool, None),
+    "output_tecplot": (bool, None),
+}
+
 GENERATOR_DEFAULTS = {
     "aRange": [0.001, 10.0, 41],
     "Pe1Range": [1000.0, 1000.0, 1],
@@ -112,8 +129,47 @@ def json_response(handler: BaseHTTPRequestHandler, payload: Any, status: int = 2
     handler.wfile.write(body)
 
 
-def error_response(handler: BaseHTTPRequestHandler, message: str, status: int = 400) -> None:
-    json_response(handler, {"error": message}, status=status)
+class ApiError(Exception):
+    def __init__(
+        self,
+        message: str,
+        code: str,
+        status: int = 400,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.status = status
+        self.details = details or {}
+
+
+def default_error_code(status: int) -> str:
+    if status == 404:
+        return "UNKNOWN_ENDPOINT"
+    if status == 409:
+        return "TASK_RUNNING"
+    if status >= 500:
+        return "INTERNAL_ERROR"
+    return "VALIDATION_ERROR"
+
+
+def error_response(
+    handler: BaseHTTPRequestHandler,
+    message: str,
+    status: int = 400,
+    code: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    json_response(
+        handler,
+        {
+            "error": message,
+            "code": code or default_error_code(status),
+            "details": details or {},
+        },
+        status=status,
+    )
 
 
 def canonical_case_path(case_id: int) -> Path:
@@ -407,11 +463,11 @@ def parse_legacy_case_file(path: Path) -> dict[str, Any]:
         raise ValueError(f"{path.name} has {len(tokens)} tokens, expected at least {expected}.")
 
     try:
-        legacy_marker = int(float(tokens[0]))
+        int(float(tokens[0]))
     except ValueError as exc:
         raise ValueError(f"{path.name} has an invalid leading marker.") from exc
 
-    values: dict[str, Any] = {"legacy_marker": legacy_marker}
+    values: dict[str, Any] = {}
 
     for index, (name, caster) in enumerate(PARAM_SPECS, start=1):
         raw = tokens[index]
@@ -421,30 +477,62 @@ def parse_legacy_case_file(path: Path) -> dict[str, Any]:
             raise ValueError(f"{path.name} contains a non-numeric value for {name}.") from exc
         values[name] = int(numeric) if caster is int else numeric
 
+    for name, _, default in OPTIONAL_PARAM_SPECS:
+        values[name] = default
+
     return values
 
 
 def parse_toml_case_file(path: Path) -> dict[str, Any]:
-    values: dict[str, Any] = {"legacy_marker": 1}
+    values: dict[str, Any] = {}
+    runtime: dict[str, Any] = {}
+    section = ""
     for line_number, raw_line in enumerate(read_text_file(path).splitlines(), start=1):
         line = raw_line.split("#", 1)[0].strip()
         if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            if not section:
+                raise ValueError(f"{path.name}:{line_number} section name is required.")
             continue
         if "=" not in line:
             raise ValueError(f"{path.name}:{line_number} expected key = value.")
         key, raw_value = [part.strip() for part in line.split("=", 1)]
         if not key or not raw_value:
             raise ValueError(f"{path.name}:{line_number} key and value are required.")
-        if key == "legacy_marker":
-            values[key] = int(float(raw_value))
+        if section == "runtime":
+            spec = RUNTIME_SPECS.get(key)
+            if spec is None:
+                continue
+            caster, _ = spec
+            if caster is bool:
+                if raw_value not in {"true", "false"}:
+                    raise ValueError(f"{path.name}:{line_number} runtime.{key} must be true or false.")
+                runtime[key] = raw_value == "true"
+                continue
+            try:
+                numeric = float(raw_value)
+            except ValueError as exc:
+                raise ValueError(f"{path.name}:{line_number} contains a non-numeric value for runtime.{key}.") from exc
+            if caster is int and not numeric.is_integer():
+                raise ValueError(f"{path.name}:{line_number} runtime.{key} must be an integer.")
+            runtime[key] = int(numeric) if caster is int else numeric
+            continue
+        if section:
+            continue
+        if key in {"legacy_marker", "case_id"}:
             continue
         spec = dict(PARAM_SPECS).get(key)
-        if spec is None:
+        optional_spec = {name: caster for name, caster, _ in OPTIONAL_PARAM_SPECS}.get(key)
+        if spec is None and optional_spec is None:
             continue
         try:
             numeric = float(raw_value)
         except ValueError as exc:
             raise ValueError(f"{path.name}:{line_number} contains a non-numeric value for {key}.") from exc
+        if optional_spec is not None:
+            spec = optional_spec
         if spec is int and not numeric.is_integer():
             raise ValueError(f"{path.name}:{line_number} {key} must be an integer.")
         values[key] = int(numeric) if spec is int else numeric
@@ -452,6 +540,10 @@ def parse_toml_case_file(path: Path) -> dict[str, Any]:
     missing = [name for name, _ in PARAM_SPECS if name not in values]
     if missing:
         raise ValueError(f"{path.name} is missing TOML field(s): {', '.join(missing)}.")
+    for name, _, default in OPTIONAL_PARAM_SPECS:
+        values.setdefault(name, default)
+    if runtime:
+        values["runtime"] = runtime
     return values
 
 
@@ -462,7 +554,7 @@ def parse_case_file(path: Path) -> dict[str, Any]:
 
 
 def validate_case_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    validated: dict[str, Any] = {"legacy_marker": int(payload.get("legacy_marker", 1))}
+    validated: dict[str, Any] = {}
     for name, caster in PARAM_SPECS:
         if name not in payload:
             raise ValueError(f"Missing field: {name}")
@@ -477,14 +569,54 @@ def validate_case_payload(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"Field {name} must be an integer.")
         validated[name] = int(number) if caster is int else number
 
+    for name, caster, default in OPTIONAL_PARAM_SPECS:
+        raw = payload.get(name, default)
+        try:
+            number = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Field {name} must be numeric.") from exc
+        if not math.isfinite(number):
+            raise ValueError(f"Field {name} must be finite.")
+        if caster is int and not number.is_integer():
+            raise ValueError(f"Field {name} must be an integer.")
+        validated[name] = int(number) if caster is int else number
+
+    runtime_payload = payload.get("runtime")
+    if isinstance(runtime_payload, dict):
+        runtime: dict[str, Any] = {}
+        for name, (caster, _) in RUNTIME_SPECS.items():
+            if name not in runtime_payload:
+                continue
+            raw = runtime_payload[name]
+            if caster is bool:
+                if not isinstance(raw, bool):
+                    raise ValueError(f"runtime.{name} must be true or false.")
+                runtime[name] = raw
+                continue
+            try:
+                number = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"runtime.{name} must be numeric.") from exc
+            if not math.isfinite(number):
+                raise ValueError(f"runtime.{name} must be finite.")
+            if caster is int and not number.is_integer():
+                raise ValueError(f"runtime.{name} must be an integer.")
+            runtime[name] = int(number) if caster is int else number
+        if runtime:
+            validated["runtime"] = runtime
+
     if validated["lam"] <= 0:
         raise ValueError("lam must be greater than 0.")
     if validated["ny"] <= 0:
         raise ValueError("ny must be a positive integer.")
     if validated["K0"] <= 0:
         raise ValueError("K0 must be greater than 0.")
-    if validated["alpha"] == 0:
-        raise ValueError("alpha must not be 0.")
+    if validated["eps"] <= 0:
+        raise ValueError("eps must be greater than 0.")
+    if validated["alpha"] < 1e-6:
+        raise ValueError("alpha must be at least 1e-6.")
+    if validated["Sc"] <= 0:
+        raise ValueError("Sc must be greater than 0.")
     if validated["total_count"] <= 0:
         raise ValueError("total_count must be a positive integer.")
     if validated["coeff_dt"] <= 0:
@@ -493,6 +625,17 @@ def validate_case_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("endT must be greater than 0.")
     if not (0.0 <= validated["xpo_l"] < validated["xpo_r"] <= 1.0):
         raise ValueError("xpo_l and xpo_r must satisfy 0 <= xpo_l < xpo_r <= 1.")
+
+    runtime = validated.get("runtime", {})
+    for key in ["stats_interval", "stability_check_interval", "checkpoint_interval"]:
+        if key in runtime and runtime[key] <= 0:
+            raise ValueError(f"runtime.{key} must be a positive integer.")
+    for key in ["dense_dump_count"]:
+        if key in runtime and runtime[key] < 0:
+            raise ValueError(f"runtime.{key} must be a non-negative integer.")
+    for key in ["dense_dump_start", "convergence_threshold"]:
+        if key in runtime and runtime[key] < 0:
+            raise ValueError(f"runtime.{key} must be non-negative.")
 
     return validated
 
@@ -611,6 +754,12 @@ def build_generation_config(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Sc must be greater than 0.")
     if config["startId"] <= 0:
         raise ValueError("startId must be a positive integer.")
+    if fixed["eps"] <= 0:
+        raise ValueError("eps must be greater than 0 (used as a divisor in endT).")
+    if fixed["K0"] <= 0:
+        raise ValueError("K0 must be greater than 0.")
+    if config["aRange"][0] < 1e-6:
+        raise ValueError("alpha lower bound must be at least 1e-6.")
 
     counts = [config["aRange"][2], config["Pe1Range"][2], config["Pe2Range"][2]]
     total = counts[0] * counts[1] * counts[2]
@@ -636,7 +785,6 @@ def generate_case_values(config: dict[str, Any]) -> list[tuple[int, dict[str, An
                 dt_limit = math.pi / (config["dtLimitDenom"] * (alpha ** 2))
                 coeff_dt = min(config["coeffMax"], dt_limit / (h ** 2))
                 values = {
-                    "legacy_marker": 1,
                     "lam": round_generated(fixed["lam"]),
                     "Pe": round_generated(pe1),
                     "Pe2": round_generated(pe2),
@@ -650,6 +798,7 @@ def generate_case_values(config: dict[str, Any]) -> list[tuple[int, dict[str, An
                     "total_count": fixed["total_count"],
                     "coeff_dt": round_generated(coeff_dt),
                     "x_ini_posi": round_generated(fixed["x_ini_posi"]),
+                    "Sc": round_generated(config["Sc"]),
                     "alpha": round_generated(alpha),
                 }
                 rows.append((case_id, validate_case_payload(values)))
@@ -689,9 +838,23 @@ def generate_cases(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def serialize_case(case_id: int, values: dict[str, Any]) -> str:
-    lines = [f"legacy_marker = {int(values.get('legacy_marker', 1))}"]
+    lines = [f"case_id = {case_id}"]
     for name, caster in PARAM_SPECS:
         lines.append(f"{name} = {format_number(values[name], caster)}")
+    for name, caster, default in OPTIONAL_PARAM_SPECS:
+        lines.append(f"{name} = {format_number(values.get(name, default), caster)}")
+    runtime = values.get("runtime")
+    if isinstance(runtime, dict) and runtime:
+        lines.append("")
+        lines.append("[runtime]")
+        for name, (caster, _) in RUNTIME_SPECS.items():
+            if name not in runtime:
+                continue
+            value = runtime[name]
+            if caster is bool:
+                lines.append(f"{name} = {'true' if value else 'false'}")
+            else:
+                lines.append(f"{name} = {format_number(value, caster)}")
     return "\n".join(lines) + "\n"
 
 
@@ -778,14 +941,17 @@ def parse_remarks_values(path: Path | None) -> dict[str, float | int]:
     return values
 
 
-def load_case_values(case_id: int) -> dict[str, Any]:
-    case_path = discover_case_files().get(case_id)
+def load_case_values_from_path(case_path: Path | None) -> dict[str, Any]:
     if not case_path or not case_path.exists():
         return {}
     try:
         return parse_case_file(case_path)
     except ValueError:
         return {}
+
+
+def load_case_values(case_id: int) -> dict[str, Any]:
+    return load_case_values_from_path(discover_case_files().get(case_id))
 
 
 def derive_result_metadata(case_id: int, remarks_path: Path | None) -> dict[str, Any]:
@@ -844,6 +1010,7 @@ def derive_result_metadata(case_id: int, remarks_path: Path | None) -> dict[str,
         "K0",
         "eps",
         "alpha",
+        "Sc",
         "nx",
         "ny",
         "h",
@@ -1120,12 +1287,12 @@ class TaskState:
         self.build_log = []
         self.run_log = []
         self.completed_case_ids = set()
-        self.case_records = {case_id: self._new_case_record(case_id) for case_id in case_ids}
+        self.case_records = {case_id: self._new_case_record(case_id, load_metadata=False) for case_id in case_ids}
         self.active_process = None
         self.stop_requested = False
 
-    def _new_case_record(self, case_id: int) -> dict[str, Any]:
-        values = load_case_values(case_id)
+    def _new_case_record(self, case_id: int, values: dict[str, Any] | None = None, load_metadata: bool = True) -> dict[str, Any]:
+        values = values if values is not None else (load_case_values(case_id) if load_metadata else {})
         k0 = _finite_number(values.get("K0"))
         eta_eq = k0 / (1.0 + k0) if k0 and k0 > 0 else None
         return {
@@ -1146,6 +1313,16 @@ class TaskState:
             "progressSamples": [],
             "log": [],
         }
+
+    def update_case_metadata(self, case_id: int, values: dict[str, Any]) -> None:
+        record = self.case_records.get(case_id)
+        if record is None:
+            return
+        k0 = _finite_number(values.get("K0"))
+        record["alpha"] = _finite_number(values.get("alpha"))
+        record["Pe2"] = _finite_number(values.get("Pe2"))
+        record["Pe"] = _finite_number(values.get("Pe"))
+        record["etaEq"] = k0 / (1.0 + k0) if k0 and k0 > 0 else None
 
     def append_log(self, stage: str, line: str) -> None:
         target = self.build_log if stage == "building" else self.run_log
@@ -1256,6 +1433,28 @@ class TaskState:
                 if record["durationSeconds"] is None and record["startedAt"]:
                     record["durationSeconds"] = _seconds_since(record["startedAt"])
                 record["alertReason"] = "stopped"
+
+    def finalize_remaining_as_failed(self, reason: str = "task failed") -> None:
+        for record in self.case_records.values():
+            if record["status"] in {"waiting", "running", "suspicious"}:
+                self._mark_case_started(record)
+                record["status"] = "failed"
+                record["finishedAt"] = datetime.now().isoformat(timespec="seconds")
+                if record["durationSeconds"] is None and record["startedAt"]:
+                    record["durationSeconds"] = _seconds_since(record["startedAt"])
+                record["alertReason"] = reason
+        self.completed_cases = len(self.completed_case_ids)
+        self.failed_cases = sum(1 for item in self.case_records.values() if item["status"] == "failed")
+
+    def finish_as_stopped(self, stage: str | None = None, message: str = "[warn] Task stopped by user.") -> None:
+        self.stop_requested = True
+        self.status = "stopped"
+        if stage:
+            self.stage = stage
+        self.error = None
+        self.finished_at = datetime.now().isoformat(timespec="seconds")
+        self.mark_waiting_as_stopped()
+        self.append_log(self.stage if self.stage in {"building", "running"} else "run", message)
 
     def _refresh_case_alert(self, record: dict[str, Any]) -> None:
         eta = _finite_number(record.get("eta"))
@@ -1398,7 +1597,7 @@ class TaskState:
             "stage": self.stage,
             "caseId": self.case_id,
             "mode": self.mode,
-            "caseIds": self.case_ids,
+            "caseIds": list(self.case_ids),
             "totalCases": self.total_cases,
             "completedCases": self.completed_cases,
             "failedCases": self.failed_cases,
@@ -1709,7 +1908,8 @@ def run_warmup_benchmarks(case_ids: list[int],
                           warmup_seconds: float,
                           sample_seed: int) -> None:
     with WARMUP_STATE.lock:
-        WARMUP_STATE.reset(candidates, case_ids, sample_seed)
+        if WARMUP_STATE.status != "running":
+            WARMUP_STATE.reset(candidates, case_ids, sample_seed)
         WARMUP_STATE.append_log(
             f"[info] Starting warmup with {len(candidates)} candidate(s), {len(case_ids)} case(s), sample seed {sample_seed}."
         )
@@ -1797,13 +1997,51 @@ def run_warmup_benchmarks(case_ids: list[int],
 
 def run_build_and_solver(case_ids: list[int], force_restart: bool = False, mode: str = "single") -> None:
     with TASK_STATE.lock:
-        TASK_STATE.reset(case_ids, force_restart, mode)
+        if TASK_STATE.status != "running":
+            TASK_STATE.reset(case_ids, force_restart, mode)
         if mode == "batch":
             TASK_STATE.append_log("building", f"[info] Preparing batch build for {len(case_ids)} cases.")
         else:
             TASK_STATE.append_log("building", f"[info] Preparing build for case {case_ids[0]}.")
         if force_restart:
             TASK_STATE.append_log("building", "[info] Force restart requested for this run.")
+
+    metadata_started = time.perf_counter()
+    with TASK_STATE.lock:
+        TASK_STATE.append_log("building", f"[info] Loading metadata for {len(case_ids)} case(s).")
+    case_files = discover_case_files()
+    metadata_batch: list[tuple[int, dict[str, Any]]] = []
+    for metadata_case_id in case_ids:
+        try:
+            metadata_batch.append((metadata_case_id, load_case_values_from_path(case_files.get(metadata_case_id))))
+        except Exception as exc:  # noqa: BLE001
+            with TASK_STATE.lock:
+                TASK_STATE.append_log("building", f"[warn] Could not read case {metadata_case_id} metadata: {exc}")
+        if len(metadata_batch) >= 128:
+            with TASK_STATE.lock:
+                if TASK_STATE.stop_requested:
+                    TASK_STATE.finish_as_stopped("building", "[warn] Task stopped while preparing case metadata.")
+                    return
+                for update_case_id, values in metadata_batch:
+                    TASK_STATE.update_case_metadata(update_case_id, values)
+            metadata_batch = []
+    if metadata_batch:
+        with TASK_STATE.lock:
+            if TASK_STATE.stop_requested:
+                TASK_STATE.finish_as_stopped("building", "[warn] Task stopped while preparing case metadata.")
+                return
+            for update_case_id, values in metadata_batch:
+                TASK_STATE.update_case_metadata(update_case_id, values)
+
+    with TASK_STATE.lock:
+        if TASK_STATE.stop_requested:
+            TASK_STATE.finish_as_stopped("building", "[warn] Task stopped before environment check.")
+            return
+        TASK_STATE.append_log(
+            "building",
+            f"[info] Metadata loaded in {time.perf_counter() - metadata_started:.2f}s.",
+        )
+        TASK_STATE.append_log("building", "[info] Checking build environment.")
 
     env = environment_snapshot()
     if not env["canRun"]:
@@ -1812,12 +2050,15 @@ def run_build_and_solver(case_ids: list[int], force_restart: bool = False, mode:
             TASK_STATE.stage = "building"
             TASK_STATE.error = "Build environment is not ready."
             TASK_STATE.finished_at = datetime.now().isoformat(timespec="seconds")
+            TASK_STATE.finalize_remaining_as_failed("build environment is not ready")
             TASK_STATE.append_log("building", "[error] Build environment is not ready.")
         return
 
     try:
         build_mode = env["buildMode"]
         wsl_fallback_available = bool(env.get("wslCMakeAvailable"))
+        with TASK_STATE.lock:
+            TASK_STATE.append_log("building", f"[info] Build mode: {build_mode or 'unavailable'}.")
         if build_mode == "native":
             clear_cmake_cache_for_wsl()
             configure_exit_code = run_task_command(
@@ -1881,6 +2122,7 @@ def run_build_and_solver(case_ids: list[int], force_restart: bool = False, mode:
             TASK_STATE.stage = "building"
             TASK_STATE.error = f"Failed to start build: {exc}"
             TASK_STATE.finished_at = datetime.now().isoformat(timespec="seconds")
+            TASK_STATE.finalize_remaining_as_failed("failed to start build")
             TASK_STATE.append_log("building", f"[error] {TASK_STATE.error}")
         return
     except RuntimeError as exc:
@@ -1890,8 +2132,10 @@ def run_build_and_solver(case_ids: list[int], force_restart: bool = False, mode:
             TASK_STATE.error = None if TASK_STATE.stop_requested else str(exc)
             TASK_STATE.finished_at = datetime.now().isoformat(timespec="seconds")
             if TASK_STATE.stop_requested:
+                TASK_STATE.mark_waiting_as_stopped()
                 TASK_STATE.append_log("building", "[warn] Task stopped during build.")
             else:
+                TASK_STATE.finalize_remaining_as_failed(str(exc))
                 TASK_STATE.append_log("building", f"[error] {exc}")
         return
 
@@ -1905,8 +2149,10 @@ def run_build_and_solver(case_ids: list[int], force_restart: bool = False, mode:
             TASK_STATE.error = None if TASK_STATE.stop_requested else "Build failed."
             TASK_STATE.finished_at = datetime.now().isoformat(timespec="seconds")
             if TASK_STATE.stop_requested:
+                TASK_STATE.mark_waiting_as_stopped()
                 TASK_STATE.append_log("building", "[warn] Task stopped during build.")
             else:
+                TASK_STATE.finalize_remaining_as_failed("build failed")
                 TASK_STATE.append_log("building", "[error] Build failed.")
         return
 
@@ -1958,6 +2204,7 @@ def run_build_and_solver(case_ids: list[int], force_restart: bool = False, mode:
                 TASK_STATE.stage = "running"
                 TASK_STATE.error = f"Failed to start solver: {exc}"
                 TASK_STATE.finished_at = datetime.now().isoformat(timespec="seconds")
+                TASK_STATE.finalize_remaining_as_failed("failed to start solver")
                 TASK_STATE.append_log("run", f"[error] {TASK_STATE.error}")
             return
 
@@ -1988,14 +2235,34 @@ def run_build_and_solver(case_ids: list[int], force_restart: bool = False, mode:
         else:
             TASK_STATE.status = "failed"
             TASK_STATE.error = "Solver exited with a non-zero status."
+            TASK_STATE.finalize_remaining_as_failed("solver exited with a non-zero status")
             TASK_STATE.append_log("run", "[error] Solver failed.")
+
+
+def run_build_and_solver_safe(case_ids: list[int], force_restart: bool = False, mode: str = "single") -> None:
+    try:
+        run_build_and_solver(case_ids, force_restart, mode)
+    except Exception as exc:  # noqa: BLE001
+        with TASK_STATE.lock:
+            TASK_STATE.status = "failed"
+            TASK_STATE.error = str(exc)
+            TASK_STATE.finished_at = datetime.now().isoformat(timespec="seconds")
+            TASK_STATE.finalize_remaining_as_failed("background task crashed")
+            TASK_STATE.append_log(
+                TASK_STATE.stage if TASK_STATE.stage in {"building", "running"} else "building",
+                f"[error] Background task crashed: {exc}",
+            )
 
 
 def launch_task(case_id: int, force_restart: bool = False) -> dict[str, Any]:
     with TASK_STATE.lock:
-        if TASK_STATE.status == "running":
-            raise RuntimeError("Another build/run task is already active.")
-    worker = threading.Thread(target=run_build_and_solver, args=([case_id], force_restart, "single"), daemon=True)
+        with WARMUP_STATE.lock:
+            if TASK_STATE.status == "running":
+                raise ApiError("Another build/run task is already active.", "TASK_RUNNING", status=409)
+            if WARMUP_STATE.status == "running":
+                raise ApiError("A warmup task is already active.", "WARMUP_RUNNING", status=409)
+            TASK_STATE.reset([case_id], force_restart, "single")
+    worker = threading.Thread(target=run_build_and_solver_safe, args=([case_id], force_restart, "single"), daemon=True)
     worker.start()
     return {
         "accepted": True,
@@ -2020,9 +2287,13 @@ def launch_search_task(case_query: str, force_restart: bool = False) -> dict[str
     if not case_ids:
         raise ValueError("No cases matched the current search.")
     with TASK_STATE.lock:
-        if TASK_STATE.status == "running":
-            raise RuntimeError("Another build/run task is already active.")
-    worker = threading.Thread(target=run_build_and_solver, args=(case_ids, force_restart, "batch"), daemon=True)
+        with WARMUP_STATE.lock:
+            if TASK_STATE.status == "running":
+                raise ApiError("Another build/run task is already active.", "TASK_RUNNING", status=409)
+            if WARMUP_STATE.status == "running":
+                raise ApiError("A warmup task is already active.", "WARMUP_RUNNING", status=409)
+            TASK_STATE.reset(case_ids, force_restart, "batch")
+    worker = threading.Thread(target=run_build_and_solver_safe, args=(case_ids, force_restart, "batch"), daemon=True)
     worker.start()
     return {
         "accepted": True,
@@ -2068,11 +2339,12 @@ def launch_warmup_task(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("sampleSeed must be a positive integer.")
 
     with TASK_STATE.lock:
-        if TASK_STATE.status == "running":
-            raise RuntimeError("A build/run task is already active.")
-    with WARMUP_STATE.lock:
-        if WARMUP_STATE.status == "running":
-            raise RuntimeError("A warmup task is already active.")
+        with WARMUP_STATE.lock:
+            if TASK_STATE.status == "running":
+                raise ApiError("A build/run task is already active.", "TASK_RUNNING", status=409)
+            if WARMUP_STATE.status == "running":
+                raise ApiError("A warmup task is already active.", "WARMUP_RUNNING", status=409)
+            WARMUP_STATE.reset(candidates, case_ids, sample_seed)
 
     worker = threading.Thread(
         target=run_warmup_benchmarks,
@@ -2108,7 +2380,7 @@ def apply_warmup_concurrency(value: int) -> dict[str, Any]:
         raise ValueError(f"Concurrency must be between 0 and {logical_processors}.")
     with WARMUP_STATE.lock:
         if WARMUP_STATE.status == "running":
-            raise RuntimeError("A warmup task is still running.")
+            raise ApiError("A warmup task is still running.", "WARMUP_RUNNING", status=409)
     write_num_threads_config(value)
     return {"applied": True, "numThreads": value, "config": str(CONFIG_PATH)}
 
@@ -2117,6 +2389,8 @@ def stop_task() -> dict[str, Any]:
     with TASK_STATE.lock:
         TASK_STATE.stop_requested = True
         process = TASK_STATE.active_process
+        if TASK_STATE.status == "running":
+            TASK_STATE.finish_as_stopped(TASK_STATE.stage, "[warn] Stop requested by user.")
     if process is not None:
         try:
             process.terminate()
@@ -2163,7 +2437,13 @@ class SolverUIHandler(BaseHTTPRequestHandler):
                 case_id = self._extract_id(path, "/api/cases/")
                 case_path = discover_case_files().get(case_id) or canonical_case_path(case_id)
                 if not case_path.exists():
-                    error_response(self, f"Case {case_id} was not found.", status=404)
+                    error_response(
+                        self,
+                        f"Case {case_id} was not found.",
+                        status=404,
+                        code="CASE_NOT_FOUND",
+                        details={"caseId": case_id},
+                    )
                     return
                 values = parse_case_file(case_path)
                 values.update(case_summary(case_id, case_path))
@@ -2171,25 +2451,30 @@ class SolverUIHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/run/status":
                 with TASK_STATE.lock:
-                    json_response(self, TASK_STATE.snapshot())
+                    payload = TASK_STATE.snapshot()
+                json_response(self, payload)
                 return
             if path.startswith("/api/run/case-log/"):
                 case_id = self._extract_id(path, "/api/run/case-log/")
                 with TASK_STATE.lock:
-                    json_response(self, TASK_STATE.case_log_payload(case_id))
+                    payload = TASK_STATE.case_log_payload(case_id)
+                json_response(self, payload)
                 return
             if path == "/api/warmup/status":
                 with WARMUP_STATE.lock:
-                    json_response(self, WARMUP_STATE.snapshot())
+                    payload = WARMUP_STATE.snapshot()
+                json_response(self, payload)
                 return
             if path.startswith("/api/results/"):
                 self._handle_result_request(path)
                 return
             self._serve_static(path)
+        except ApiError as exc:
+            error_response(self, str(exc), status=exc.status, code=exc.code, details=exc.details)
         except ValueError as exc:
-            error_response(self, str(exc), status=400)
+            error_response(self, str(exc), status=400, code="VALIDATION_ERROR")
         except Exception as exc:  # noqa: BLE001
-            error_response(self, f"Internal error: {exc}", status=500)
+            error_response(self, f"Internal error: {exc}", status=500, code="INTERNAL_ERROR")
 
     def do_PUT(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -2202,11 +2487,13 @@ class SolverUIHandler(BaseHTTPRequestHandler):
                 write_text_file(target, serialize_case(case_id, values))
                 json_response(self, {"saved": True, "id": case_id, "path": str(target)})
                 return
-            error_response(self, "Unknown endpoint.", status=404)
+            error_response(self, "Unknown endpoint.", status=404, code="UNKNOWN_ENDPOINT")
+        except ApiError as exc:
+            error_response(self, str(exc), status=exc.status, code=exc.code, details=exc.details)
         except ValueError as exc:
-            error_response(self, str(exc), status=400)
+            error_response(self, str(exc), status=400, code="VALIDATION_ERROR")
         except Exception as exc:  # noqa: BLE001
-            error_response(self, f"Internal error: {exc}", status=500)
+            error_response(self, f"Internal error: {exc}", status=500, code="INTERNAL_ERROR")
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
@@ -2244,13 +2531,16 @@ class SolverUIHandler(BaseHTTPRequestHandler):
                 payload = self._read_json_body()
                 json_response(self, apply_warmup_concurrency(int(payload.get("concurrency"))))
                 return
-            error_response(self, "Unknown endpoint.", status=404)
+            error_response(self, "Unknown endpoint.", status=404, code="UNKNOWN_ENDPOINT")
+        except ApiError as exc:
+            error_response(self, str(exc), status=exc.status, code=exc.code, details=exc.details)
         except RuntimeError as exc:
-            error_response(self, str(exc), status=409)
+            code = "BUILD_ENV_NOT_READY" if "Build environment is not ready" in str(exc) else "TASK_RUNNING"
+            error_response(self, str(exc), status=409, code=code)
         except ValueError as exc:
-            error_response(self, str(exc), status=400)
+            error_response(self, str(exc), status=400, code="VALIDATION_ERROR")
         except Exception as exc:  # noqa: BLE001
-            error_response(self, f"Internal error: {exc}", status=500)
+            error_response(self, f"Internal error: {exc}", status=500, code="INTERNAL_ERROR")
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
         message = format % args
@@ -2260,7 +2550,7 @@ class SolverUIHandler(BaseHTTPRequestHandler):
         suffix = path.removeprefix("/api/results/")
         parts = [part for part in suffix.split("/") if part]
         if not parts:
-            error_response(self, "Missing result case id.", status=404)
+            error_response(self, "Missing result case id.", status=404, code="VALIDATION_ERROR")
             return
         case_id = int(parts[0])
         if len(parts) == 1:
@@ -2293,14 +2583,20 @@ class SolverUIHandler(BaseHTTPRequestHandler):
             cc_path = data_dir / f"cc_{count}.m"
             ee_path = data_dir / f"ee_{count}.m"
             if not cc_path.exists() and not ee_path.exists():
-                error_response(self, f"Snapshot {count} for case {case_id} was not found.", status=404)
+                error_response(
+                    self,
+                    f"Snapshot {count} for case {case_id} was not found.",
+                    status=404,
+                    code="SNAPSHOT_NOT_FOUND",
+                    details={"caseId": case_id, "snapshot": count},
+                )
                 return
             json_response(
                 self,
                 {"caseId": case_id, "count": count, "matrix": parse_matrix_file(cc_path), "profile": parse_profile_file(ee_path)},
             )
             return
-        error_response(self, "Unknown result endpoint.", status=404)
+        error_response(self, "Unknown result endpoint.", status=404, code="UNKNOWN_ENDPOINT")
 
     def _read_json_body(self) -> dict[str, Any]:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -2310,7 +2606,7 @@ class SolverUIHandler(BaseHTTPRequestHandler):
         try:
             return json.loads(body.decode("utf-8"))
         except json.JSONDecodeError as exc:
-            raise ValueError("Request body must be valid JSON.") from exc
+            raise ApiError("Request body must be valid JSON.", "INVALID_JSON", status=400) from exc
 
     def _extract_id(self, path: str, prefix: str) -> int:
         raw = path.removeprefix(prefix).split("/", 1)[0]
