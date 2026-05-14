@@ -49,6 +49,37 @@ enum class ComputeBackend {
 };
 
 /**
+ * @enum CpuThreadMode
+ * @brief CPU threading strategy for case execution.
+ */
+enum class CpuThreadMode {
+    Auto,
+    CaseParallel,
+    InternalParallel
+};
+
+/**
+ * @enum AdvectionScheme
+ * @brief x-direction advection discretization used by the CPU solver.
+ */
+enum class AdvectionScheme {
+    Upwind,
+    TvdMc
+};
+
+inline const char* advection_scheme_name(AdvectionScheme scheme)
+{
+    switch (scheme) {
+    case AdvectionScheme::Upwind:
+        return "upwind";
+    case AdvectionScheme::TvdMc:
+        return "tvd-mc";
+    default:
+        return "unknown";
+    }
+}
+
+/**
  * @struct ExecutionConfig
  * @brief Runtime execution settings shared by CPU and GPU entry points.
  */
@@ -66,6 +97,7 @@ struct ExecutionConfig {
     };
 
     ComputeBackend backend{ComputeBackend::Cpu};
+    CpuThreadMode  cpu_thread_mode{CpuThreadMode::Auto};
     int            device_id{0};
     bool           gpu_reduce_stats{true};
     std::vector<int> case_numbers;
@@ -85,6 +117,7 @@ struct ExecutionConfig {
     std::vector<int> benchmark_case_numbers;
     double           benchmark_seconds{30.0};
     double           benchmark_warmup_seconds{3.0};
+    AdvectionScheme  advection_scheme{AdvectionScheme::Upwind};
 };
 
 /**

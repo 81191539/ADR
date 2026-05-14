@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDE Solver UI</title>
+  <link rel="stylesheet" href="/styles.css?v=demo4-20260514-advect-1">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-title">
+        <p class="kicker">Local PDE Control Room</p>
+        <h1>2D Diffusion-Convection Solver</h1>
+        <p class="hero-copy">Case editing · demo4 evaluation · Build &amp; run · Result inspection</p>
+      </div>
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-key">Task Status</span>
+          <strong id="task-state-badge" class="badge state-badge state-idle">idle</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-key">Current Case</span>
+          <strong id="current-case-label" class="stat-value">None</strong>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel sidebar">
+        <div class="panel-header">
+          <h2>Case List</h2>
+          <button id="refresh-cases-btn" class="ghost-btn" type="button">Refresh</button>
+        </div>
+        <div class="case-browser-controls">
+          <label class="case-search">
+            <span>Search / Jump</span>
+            <input id="case-search-input" type="search" placeholder="1-3, 1,2,5 or filename">
+          </label>
+          <button id="clear-case-search-btn" class="ghost-btn compact-btn" type="button">Clear</button>
+        </div>
+        <div id="case-list-meta" class="case-list-meta"></div>
+        <div id="case-list" class="case-list"></div>
+        <button id="load-more-cases-btn" class="ghost-btn load-more-btn hidden" type="button">Load More</button>
+      </aside>
+
+      <section class="content">
+        <section class="panel workflow-panel">
+          <nav class="tab-list" role="tablist" aria-label="Workflow">
+            <button id="tab-env" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="env-tab-panel" data-tab-target="env">
+              Environment
+            </button>
+            <button id="tab-warmup" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="warmup-tab-panel" data-tab-target="warmup">
+              Warmup
+            </button>
+            <button id="tab-case" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="case-tab-panel" data-tab-target="case">
+              Case Params
+            </button>
+            <button id="tab-generate" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="generate-tab-panel" data-tab-target="generate">
+              Generate Case
+            </button>
+            <button id="tab-demo4" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="demo4-tab-panel" data-tab-target="demo4">
+              demo4 Evaluation
+            </button>
+            <button id="tab-run" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="run-tab-panel" data-tab-target="run">
+              Build &amp; Run
+            </button>
+            <button id="tab-results" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="results-tab-panel" data-tab-target="results">
+              Results
+            </button>
+          </nav>
+
+          <div id="env-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-env">
+            <div class="panel-header">
+              <h2>Environment</h2>
+              <button id="refresh-env-btn" class="ghost-btn" type="button">Re-detect</button>
+            </div>
+            <div id="env-banner" class="env-banner">Detecting environment...</div>
+            <div id="env-grid" class="status-grid"></div>
+          </div>
+
+          <div id="warmup-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-warmup">
+            <div class="panel-header">
+              <h2>Warmup &amp; Core Selection</h2>
+              <div class="action-row">
+                <button id="start-warmup-btn" class="accent-btn" type="button">Start Warmup</button>
+                <button id="stop-warmup-btn" class="ghost-btn" type="button" disabled>Stop Warmup</button>
+                <label class="inline-control"><span>Manual</span><input id="warmup-manual-concurrency-input" type="number" min="0" step="1" placeholder="0 auto"></label>
+                <button id="apply-warmup-btn" class="ghost-btn" type="button" disabled>Apply</button>
+                <label class="checkbox-line warmup-skip-line"><input id="warmup-skip-checkbox" type="checkbox"><span>Skip warmup, use default auto</span></label>
+              </div>
+            </div>
+            <div class="warmup-meta">
+              <div><span>Logical Processors</span><strong id="warmup-logical">-</strong></div>
+              <div><span>Current NUM_THREADS</span><strong id="warmup-num-threads">-</strong></div>
+              <div><span>Search Case Count</span><strong id="warmup-case-count">-</strong></div>
+              <div><span>Current Best</span><strong id="warmup-leader">Not yet run</strong></div>
+            </div>
+            <div class="warmup-controls">
+              <label>
+                <span>Candidate Concurrency</span>
+                <input id="warmup-candidates-input" type="text" placeholder="1,2,4,8,16">
+              </label>
+              <label>
+                <span>Measure Seconds</span>
+                <input id="warmup-seconds-input" type="number" min="1" step="1" value="30">
+              </label>
+              <label>
+                <span>Warmup Seconds</span>
+                <input id="warmup-warmup-seconds-input" type="number" min="1" step="1" value="3">
+              </label>
+            </div>
+            <div id="warmup-error" class="env-banner hidden"></div>
+            <div class="table-wrap warmup-table-wrap">
+              <table class="warmup-table">
+                <thead>
+                  <tr>
+                    <th>Concurrency</th>
+                    <th>Throughput</th>
+                    <th>worker min</th>
+                    <th>worker median</th>
+                    <th>worker p90</th>
+                    <th>slowest worker</th>
+                    <th>p90 tail est.</th>
+                    <th>Samples</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="warmup-results-body">
+                  <tr><td colspan="9">No warmup results yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <pre id="warmup-log" class="log-output warmup-log">Waiting to start warmup.</pre>
+          </div>
+
+          <div id="case-tab-panel" class="tab-panel" role="tabpanel" aria-labelledby="tab-case">
+            <div class="panel-header">
+              <h2>Case Parameters</h2>
+              <div class="action-row">
+                <button id="save-case-btn" class="ghost-btn" type="button">Save Current Case</button>
+                <button id="new-case-btn" class="ghost-btn" type="button">New Case</button>
+              </div>
+            </div>
+            <form id="case-form" class="form-grid">
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Basic Info</h3>
+                  <span class="form-section-hint">Unique Case ID</span>
+                </header>
+                <div class="form-section-body">
+                  <label>
+                    <span>Case ID</span>
+                    <input id="field-case-id" type="number" min="1" step="1">
+                  </label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Geometry / Mesh</h3>
+                  <span class="form-section-hint">Spatial discretization</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>lam</span><input data-field="lam" type="number" step="any"></label>
+                  <label><span>ny</span><input data-field="ny" type="number" min="1" step="1"></label>
+                  <label><span>x_ini_posi</span><input data-field="x_ini_posi" type="number" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Flow Parameters</h3>
+                  <span class="form-section-hint">Pe / α</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>Pe</span><input data-field="Pe" type="number" step="any"></label>
+                  <label><span>Pe2</span><input data-field="Pe2" type="number" step="any"></label>
+                  <label><span>alpha</span><input data-field="alpha" type="number" step="any"></label>
+                  <label><span>Sc</span><input data-field="Sc" type="number" min="1" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Reaction Parameters</h3>
+                  <span class="form-section-hint">Da / K0</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>eps</span><input data-field="eps" type="number" step="any"></label>
+                  <label><span>Da</span><input data-field="Da" type="number" step="any"></label>
+                  <label><span>K0</span><input data-field="K0" type="number" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Adsorption Zone</h3>
+                  <span class="form-section-hint">x ∈ [0, 1]</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>xpo_l</span><input data-field="xpo_l" type="number" min="0" max="1" step="any"></label>
+                  <label><span>xpo_r</span><input data-field="xpo_r" type="number" min="0" max="1" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Time Integration</h3>
+                  <span class="form-section-hint">Explicit stepping</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>endT</span><input data-field="endT" type="number" min="0" step="any"></label>
+                  <label><span>total_count</span><input data-field="total_count" type="number" min="1" step="1"></label>
+                  <label><span>coeff_dt</span><input data-field="coeff_dt" type="number" min="0" step="any"></label>
+                </div>
+              </section>
+            </form>
+            <p id="save-hint" class="helper-text">Saved cases are written to <code>demo4/input/input_parameter_XXXX.toml</code>.</p>
+          </div>
+
+          <div id="generate-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-generate">
+            <div class="panel-header">
+              <h2>Generate Case</h2>
+              <div class="action-row">
+                <button id="preview-generate-btn" class="ghost-btn" type="button">Preview</button>
+                <button id="generate-cases-btn" class="accent-btn" type="button">Generate TOML</button>
+              </div>
+            </div>
+
+            <form id="generate-form" class="generator-grid">
+              <section class="form-section generator-ranges">
+                <header class="form-section-header">
+                  <h3>Scan ranges</h3>
+                  <span class="form-section-hint">logspace(min, max, count)</span>
+                </header>
+                <div class="generator-range-table">
+                  <div class="generator-range-head"><span>param</span><span>min</span><span>max</span><span>count</span></div>
+                  <label><span>alpha</span><input data-gen-field="aMin" type="number" step="any"><input data-gen-field="aMax" type="number" step="any"><input data-gen-field="aCount" type="number" min="1" step="1"></label>
+                  <label><span>Pe</span><input data-gen-field="pe1Min" type="number" step="any"><input data-gen-field="pe1Max" type="number" step="any"><input data-gen-field="pe1Count" type="number" min="1" step="1"></label>
+                  <label><span>Pe2</span><input data-gen-field="pe2Min" type="number" step="any"><input data-gen-field="pe2Max" type="number" step="any"><input data-gen-field="pe2Count" type="number" min="1" step="1"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Fixed parameters</h3>
+                  <span class="form-section-hint">mapped from generate_opt.m</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>lam</span><input data-gen-field="lam" type="number" step="any"></label>
+                  <label><span>eps</span><input data-gen-field="eps" type="number" step="any"></label>
+                  <label><span>Da</span><input data-gen-field="Da" type="number" step="any"></label>
+                  <label><span>K0</span><input data-gen-field="K0" type="number" step="any"></label>
+                  <label><span>ny</span><input data-gen-field="ny" type="number" min="1" step="1"></label>
+                  <label><span>xpo_l</span><input data-gen-field="xpo_l" type="number" min="0" max="1" step="any"></label>
+                  <label><span>xpo_r</span><input data-gen-field="xpo_r" type="number" min="0" max="1" step="any"></label>
+                  <label><span>total_count</span><input data-gen-field="total_count" type="number" min="1" step="1"></label>
+                  <label><span>x_ini_posi</span><input data-gen-field="x_ini_posi" type="number" step="any"></label>
+                </div>
+              </section>
+
+              <section class="form-section">
+                <header class="form-section-header">
+                  <h3>Output</h3>
+                  <span class="form-section-hint">demo4/input/input_parameter_XXXX.toml</span>
+                </header>
+                <div class="form-section-body">
+                  <label><span>startId</span><input data-gen-field="startId" type="number" min="1" step="1"></label>
+                  <label><span>coeffMax</span><input data-gen-field="coeffMax" type="number" min="0" step="any"></label>
+                  <label><span>Sc</span><input data-gen-field="Sc" type="number" min="1" step="any"></label>
+                  <label class="checkbox-line"><input data-gen-field="overwrite" type="checkbox"><span>Overwrite existing ids</span></label>
+                </div>
+              </section>
+            </form>
+
+            <div class="generator-summary">
+              <div><span>Planned</span><strong id="generate-planned">-</strong></div>
+              <div><span>ID range</span><strong id="generate-id-range">-</strong></div>
+              <div><span>Output</span><strong id="generate-output">-</strong></div>
+            </div>
+            <div id="generate-message" class="env-banner">Ready to preview generated cases.</div>
+            <div id="generate-preview" class="generator-preview"></div>
+          </div>
+
+          <div id="run-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-run">
+            <div class="panel-header">
+              <h2>Build &amp; Run</h2>
+              <div class="action-row">
+                <label class="restart-toggle">
+                  <input id="force-restart-checkbox" type="checkbox">
+                  <span>Force Restart</span>
+                </label>
+                <button id="build-run-btn" type="button">Save &amp; Build Run</button>
+                <button id="batch-run-btn" class="accent-btn" type="button">Run Search Results</button>
+                <button id="stop-btn" class="danger-btn" type="button">Stop</button>
+              </div>
+            </div>
+            <p id="batch-run-scope" class="helper-text">Batch scope: all cases</p>
+
+            <nav class="sub-tab-list" role="tablist" aria-label="Build & Run Views">
+              <button id="run-subtab-overview" class="sub-tab-button active" type="button" role="tab" aria-selected="true" data-run-subtab="overview">Overview</button>
+              <button id="run-subtab-build" class="sub-tab-button" type="button" role="tab" aria-selected="false" data-run-subtab="build">Build Log</button>
+              <button id="run-subtab-run" class="sub-tab-button" type="button" role="tab" aria-selected="false" data-run-subtab="run">Run Log</button>
+            </nav>
+
+            <section id="run-subpanel-overview" class="run-subpanel" role="tabpanel" aria-labelledby="run-subtab-overview">
+              <div id="run-status-banner" class="run-status-banner run-status-banner--idle">
+                No runs started yet. Click "Save &amp; Build Run" or "Run Search Results" above to begin.
+              </div>
+
+              <div id="stage-chips" class="stage-chips" aria-label="Build & Run Stages"></div>
+
+              <div class="overall-progress" aria-label="Overall Progress">
+                <div class="overall-progress-track">
+                  <div id="overall-progress-fill" class="overall-progress-fill"></div>
+                </div>
+                <div class="overall-progress-meta">
+                  <span id="overall-progress-label">Not started</span>
+                  <strong id="overall-progress-percent">0%</strong>
+                </div>
+              </div>
+
+              <div id="run-kpi" class="run-kpi hidden" aria-label="Live Run Metrics">
+                <div class="kpi-card">
+                  <span class="kpi-label">case</span>
+                  <strong id="kpi-case" class="kpi-value">-</strong>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">backend</span>
+                  <strong id="kpi-backend" class="kpi-value">-</strong>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">eta</span>
+                  <strong id="kpi-eta" class="kpi-value">-</strong>
+                </div>
+                <div class="kpi-card kpi-card--err">
+                  <span class="kpi-label">err (log10 trend)</span>
+                  <strong id="kpi-err" class="kpi-value">-</strong>
+                  <canvas id="kpi-err-spark" class="kpi-spark" width="320" height="40"></canvas>
+                </div>
+                <div class="kpi-card">
+                  <span class="kpi-label">used</span>
+                  <strong id="kpi-used" class="kpi-value">-</strong>
+                </div>
+              </div>
+
+              <div class="run-meta" aria-label="Run Metadata">
+                <div><span>Status</span><strong id="run-stage" class="badge state-badge state-idle">idle</strong></div>
+                <div><span>Batch Progress</span><strong id="batch-progress">-</strong></div>
+                <div><span>Started</span><strong id="run-started">-</strong></div>
+                <div><span>Finished</span><strong id="run-finished">-</strong></div>
+                <div class="run-diagnostic-meta hidden"><span>Build Exit Code</span><strong id="build-exit" class="badge exit-badge">-</strong></div>
+                <div class="run-diagnostic-meta hidden"><span>Run Exit Code</span><strong id="run-exit" class="badge exit-badge">-</strong></div>
+              </div>
+
+              <div id="run-error" class="error-banner hidden"></div>
+            </section>
+
+            <section id="run-subpanel-build" class="run-subpanel hidden" role="tabpanel" aria-labelledby="run-subtab-build">
+              <div class="log-toolbar">
+                <h3>Build Log</h3>
+                <span id="build-log-summary" class="log-summary">0 lines</span>
+                <div class="log-toolbar-actions">
+                  <label class="log-toggle">
+                    <input type="checkbox" id="build-log-only-errors">
+                    <span>Errors/Warnings only</span>
+                  </label>
+                  <label class="log-toggle">
+                    <input type="checkbox" id="build-log-follow" checked>
+                    <span>Follow tail</span>
+                  </label>
+                  <button id="build-log-jump-error" class="ghost-btn compact-btn" type="button">Jump to first error</button>
+                  <button id="build-log-copy" class="ghost-btn compact-btn" type="button">Copy</button>
+                </div>
+              </div>
+              <div id="build-log" class="log-panel" role="log" aria-live="polite"></div>
+            </section>
+
+            <section id="run-subpanel-run" class="run-subpanel hidden" role="tabpanel" aria-labelledby="run-subtab-run">
+              <div class="log-toolbar">
+                <h3>Run Log</h3>
+                <span id="run-log-summary" class="log-summary">0 lines</span>
+                <div class="log-toolbar-actions">
+                  <label class="log-toggle">
+                    <input type="checkbox" id="run-log-only-errors">
+                    <span>Errors/Warnings only</span>
+                  </label>
+                  <label class="log-toggle">
+                    <input type="checkbox" id="run-log-follow" checked>
+                    <span>Follow tail</span>
+                  </label>
+                  <button id="run-log-jump-error" class="ghost-btn compact-btn" type="button">Jump to first error</button>
+                  <button id="run-log-copy" class="ghost-btn compact-btn" type="button">Copy</button>
+                </div>
+              </div>
+              <div id="run-log" class="log-panel" role="log" aria-live="polite"></div>
+            </section>
+          </div>
+
+          <div id="results-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-results">
+            <div class="panel-header">
+              <h2>Results</h2>
+              <div class="action-row">
+                <button id="refresh-results-btn" class="ghost-btn" type="button">Refresh Results</button>
+                <select id="snapshot-select"></select>
+              </div>
+            </div>
+
+            <div id="results-empty" class="empty-state">
+              No results to display. You can browse historical cases or run a solve once the environment is ready.
+            </div>
+
+            <div id="results-body" class="results-body hidden">
+              <dl id="summary-grid" class="details-list"></dl>
+              <div class="results-visual-grid">
+                <div class="chart-card evolution-card">
+                  <h3>cc Concentration Field Snapshot</h3>
+                  <canvas id="heatmap-canvas" width="980" height="460"></canvas>
+                </div>
+                <div class="results-side-stack">
+                  <div class="chart-card profile-card">
+                    <h3>eta(x) Profile</h3>
+                    <canvas id="profile-chart" width="640" height="260"></canvas>
+                  </div>
+                  <div class="chart-card eta-card">
+                    <h3>eta_ave Time Series</h3>
+                    <canvas id="eta-chart" width="640" height="260"></canvas>
+                  </div>
+                  <div class="chart-card deta-card">
+                    <h3>d(eta_ave)/dt Time Series</h3>
+                    <canvas id="deta-chart" width="760" height="260"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="demo4-tab-panel" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-demo4">
+            <div class="panel-header">
+              <h2>demo4 Evaluation</h2>
+              <div class="action-row">
+                <button id="demo4-refresh-btn" class="ghost-btn" type="button">Refresh</button>
+                <button id="demo4-build-btn" class="accent-btn" type="button">Build Solver</button>
+                <button id="demo4-report-btn" class="ghost-btn" type="button">Build Summary</button>
+                <button id="demo4-stop-btn" class="danger-btn" type="button">Stop demo4 Task</button>
+              </div>
+            </div>
+
+            <div id="demo4-message" class="env-banner">demo4 lists schemes and results only. It does not select a scheme.</div>
+
+            <section class="chart-card demo4-scheme-panel">
+              <h3>Candidate Schemes</h3>
+              <div class="table-wrap"><table class="preview-table"><tbody id="demo4-scheme-body"><tr><td>No scheme rows.</td></tr></tbody></table></div>
+            </section>
+
+            <div class="demo4-layout">
+              <section class="demo4-control-panel">
+                <div class="form-section">
+                  <header class="form-section-header">
+                    <h3>Precheck</h3>
+                    <span class="form-section-hint">Characteristic time scales</span>
+                  </header>
+                  <div class="form-section-body demo4-form-body">
+                    <label>
+                      <span>input dir</span>
+                      <select id="demo4-precheck-input-dir">
+                        <option value="demo4/input">demo4/input</option>
+                        <option value="input">input</option>
+                        <option value="demo3/input">demo3/input</option>
+                        <option value="custom">custom</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>custom input dir</span>
+                      <input id="demo4-precheck-custom-input" type="text" placeholder="demo4/input">
+                    </label>
+                    <label>
+                      <span>cases</span>
+                      <input id="demo4-precheck-cases" type="text" placeholder="1,2,5-8">
+                    </label>
+                    <button id="demo4-precheck-btn" class="accent-btn" type="button">Run Precheck</button>
+                  </div>
+                </div>
+
+                <div class="form-section">
+                  <header class="form-section-header">
+                    <h3>Short Validation</h3>
+                    <span class="form-section-hint">dt and grid refinements run separately</span>
+                  </header>
+                  <div class="form-section-body demo4-form-body">
+                    <label>
+                      <span>input dir</span>
+                      <select id="demo4-validation-input-dir">
+                        <option value="demo4/input">demo4/input</option>
+                        <option value="input">input</option>
+                        <option value="demo3/input">demo3/input</option>
+                        <option value="custom">custom</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>custom input dir</span>
+                      <input id="demo4-validation-custom-input" type="text" placeholder="demo4/input">
+                    </label>
+                    <label>
+                      <span>cases</span>
+                      <input id="demo4-validation-cases" type="text" placeholder="1">
+                    </label>
+                    <label>
+                      <span>validation endT</span>
+                      <input id="demo4-validation-max-endt" type="number" min="0" step="any" value="0.00008">
+                    </label>
+                    <label>
+                      <span>timeout seconds</span>
+                      <input id="demo4-validation-timeout" type="number" min="1" step="1" value="300">
+                    </label>
+                    <label>
+                      <span>advection scheme</span>
+                      <select id="demo4-validation-advection-scheme">
+                        <option value="upwind">Baseline Upwind</option>
+                        <option value="tvd-mc">High-Resolution (TVD-MC)</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="form-section">
+                  <header class="form-section-header">
+                    <h3>dt-refine Validation</h3>
+                    <span class="form-section-hint">baseline vs smaller dt</span>
+                  </header>
+                  <div class="form-section-body demo4-form-body">
+                    <label>
+                      <span>dt-refine</span>
+                      <input id="demo4-validation-dt-refine" type="number" min="1" step="any" value="4">
+                    </label>
+                    <button id="demo4-validation-dt-btn" class="accent-btn" type="button">Run dt-refine Validation</button>
+                  </div>
+                </div>
+
+                <div class="form-section">
+                  <header class="form-section-header">
+                    <h3>ny-refine Validation</h3>
+                    <span class="form-section-hint">baseline vs finer grid</span>
+                  </header>
+                  <div class="form-section-body demo4-form-body">
+                    <label>
+                      <span>ny-refine</span>
+                      <input id="demo4-validation-ny-refine" type="number" min="2" step="1" value="2">
+                    </label>
+                    <button id="demo4-validation-ny-btn" class="accent-btn" type="button">Run ny-refine Validation</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="demo4-output-panel">
+                <div class="demo4-status-grid" id="demo4-status-grid"></div>
+                <div class="demo4-progress-panel" id="demo4-progress-panel">
+                  <div class="demo4-progress-head">
+                    <div>
+                      <span>Validation Progress</span>
+                      <strong id="demo4-progress-label">No validation task</strong>
+                    </div>
+                    <strong id="demo4-progress-percent">0%</strong>
+                  </div>
+                  <div class="demo4-progress-track"><div id="demo4-progress-fill" class="demo4-progress-fill"></div></div>
+                  <div class="table-wrap demo4-progress-table-wrap">
+                    <table class="preview-table">
+                      <tbody id="demo4-progress-body"><tr><td>No validation progress.</td></tr></tbody>
+                    </table>
+                  </div>
+                </div>
+                <pre id="demo4-log" class="log-output demo4-log">Waiting for a demo4 task.</pre>
+              </section>
+            </div>
+
+            <div class="demo4-results-grid">
+              <section class="chart-card">
+                <h3>Precheck Summary</h3>
+                <div class="table-wrap"><table class="preview-table"><tbody id="demo4-precheck-body"><tr><td>No precheck results.</td></tr></tbody></table></div>
+              </section>
+              <section class="chart-card">
+                <h3>Eta Curve Comparison</h3>
+                <div id="demo4-eta-curve-chart" class="demo4-chart-empty">No eta curve validation results.</div>
+              </section>
+              <section class="chart-card">
+                <h3>Curve Metrics</h3>
+                <div class="table-wrap"><table class="preview-table"><tbody id="demo4-curve-metrics-body"><tr><td>No curve metrics.</td></tr></tbody></table></div>
+              </section>
+              <section class="chart-card">
+                <h3>Validation Summary</h3>
+                <div class="table-wrap"><table class="preview-table"><tbody id="demo4-validation-body"><tr><td>No validation results.</td></tr></tbody></table></div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js?v=demo4-20260514-advect-1" defer></script>
+</body>
+</html>

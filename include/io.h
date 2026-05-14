@@ -103,6 +103,7 @@ void write_detailed_log(const char* fname_log, int case_number,
                         const Params& p, const GridInfo& grid,
                         const PhysicsParams& phys, const AdsorptionZone& zone,
                         const RunLog& log, double dt_initial,
+                        AdvectionScheme advection_scheme,
                         bool output_matlab = config::OUTPUT_MATLAB,
                         bool output_tecplot = config::OUTPUT_TECPLOT);
 

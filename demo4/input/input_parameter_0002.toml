@@ -1,0 +1,16 @@
+case_id = 2
+lam = 0.033333
+Pe = 10
+Pe2 = 100000
+eps = 0.1
+Da = 100
+K0 = 1
+ny = 50
+xpo_l = 0.33333
+xpo_r = 0.66667
+endT = 60
+total_count = 300
+coeff_dt = 0.1
+x_ini_posi = 5
+alpha = 1
+Sc = 16667

@@ -34,7 +34,7 @@ namespace config {
      * @note 仅当 USE_CASE_LIST = true 时生效
      */
     inline std::vector<int> get_case_list() {
-        return {1,2,3,4};
+        return {1,2};
     }
     /** @} */
 
@@ -61,7 +61,15 @@ namespace config {
      * - 0  = 自动检测，使用系统最大可用线程数（默认）
      * - >0 = 使用指定的线程数
      */
-    constexpr int NUM_THREADS = 0;
+    constexpr int NUM_THREADS = 20;
+
+    /**
+     * @brief CPU threading strategy
+     * - 0 = auto: one case uses internal kernel parallelism, multiple cases use case parallelism
+     * - 1 = case parallelism: one OpenMP worker per concurrent case
+     * - 2 = internal parallelism: serial case scheduling, OpenMP inside each case
+     */
+    constexpr int CPU_THREAD_MODE = 0;
     /** @} */
 
     /**

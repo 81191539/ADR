@@ -22,11 +22,17 @@ ADR is a 2D diffusion-convection-adsorption PDE solver. The core solver is writt
 +-- tests/            Catch-based CPU solver smoke tests
 +-- webui/            Local Python/HTML/CSS/JS Web UI
 +-- docs/             Project notes and improvement recommendations
++-- analysis/         MATLAB analysis and plotting helpers
++-- demo1..demo4/     Preserved demo workspaces and validation scenarios
 +-- CMakeLists.txt    Cross-platform CMake build entry
 `-- makefile          CMake shim for common build/test targets
 ```
 
-Generated files such as object files, executables, `output/`, `results_old/`, generated Doxygen HTML, and local archives are intentionally ignored by Git.
+Generated files such as object files, executables, `output/`, `results_old/`,
+generated Doxygen HTML, and local archives are intentionally ignored by Git.
+Historical build products, run outputs, backup snapshots, and report PDFs may
+be kept under `archive/` for local reference; `archive/` is not part of the
+source layout.
 
 ## Build
 
@@ -160,7 +166,7 @@ Default address:
 http://127.0.0.1:8000
 ```
 
-The Web UI builds with CMake first. It uses native `cmake` when available, then falls back to WSL with `cmake -S . -B build` and `cmake --build build --config Release --target df2d`. It runs the selected case with `--case <id>`, and the "从头重跑" option passes `--force-restart`.
+The Web UI builds with CMake first. It uses native `cmake` when available, then falls back to WSL with `cmake -S . -B build` and `cmake --build build --config Release --target df2d`. It runs the selected case with `--case <id>`, and the "run from scratch" option passes `--force-restart`.
 
 ## Tests
 
@@ -175,6 +181,12 @@ ctest --test-dir build --output-on-failure
 The tests cover field storage, CPU finite-state stepping, stability checks
 including eta x-dimension scanning, TOML runtime overrides, CLI validation,
 tiny end-to-end runs, and dense dump run directory behavior.
+
+## Agent Guidelines
+
+Codex-style project instructions live in `AGENTS.md`. The longer archived
+rationale is in `docs/codex_project_guidelines.md`. UI design guidance for
+agents lives in `DESIGN.md`.
 
 ## Encoding
 

@@ -12,7 +12,7 @@ std::unique_ptr<SolverBackend> create_backend(const ExecutionConfig& config)
 {
     switch (config.backend) {
     case ComputeBackend::Cpu:
-        return create_cpu_backend();
+        return create_cpu_backend(config);
     case ComputeBackend::Cuda:
 #ifdef ADR_ENABLE_CUDA
         return create_cuda_backend(config);

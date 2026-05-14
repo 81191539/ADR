@@ -14,6 +14,11 @@ namespace {
 
 class CpuSolverBackend final : public SolverBackend {
 public:
+    explicit CpuSolverBackend(AdvectionScheme advection_scheme)
+        : advection_scheme_(advection_scheme)
+    {
+    }
+
     const char* name() const override
     {
         return "CPU/OpenMP";
@@ -37,7 +42,7 @@ public:
                             const AdsorptionZone& zone,
                             double ct, double dt) override
     {
-        ::full_step_explicit(fields, grid, phys, zone, ct, dt);
+        ::full_step_explicit(fields, grid, phys, zone, ct, dt, advection_scheme_);
         std::swap(fields.cc, fields.nc);
         std::swap(fields.ee, fields.ne);
     }
@@ -67,11 +72,14 @@ public:
     void sync_device(SimFields&) override
     {
     }
+
+private:
+    AdvectionScheme advection_scheme_{AdvectionScheme::Upwind};
 };
 
 }  // namespace
 
-std::unique_ptr<SolverBackend> create_cpu_backend()
+std::unique_ptr<SolverBackend> create_cpu_backend(const ExecutionConfig& config)
 {
-    return std::make_unique<CpuSolverBackend>();
+    return std::make_unique<CpuSolverBackend>(config.advection_scheme);
 }

@@ -15,7 +15,8 @@ void full_step_explicit(SimFields& fields,
                         const GridInfo& grid,
                         const PhysicsParams& phys,
                         const AdsorptionZone& zone,
-                        double ct, double dt);
+                        double ct, double dt,
+                        AdvectionScheme advection_scheme);
 
 void calc_eta(const Field1D& ee, Field1D& ne,
               const Field2D& cc, double dt,
@@ -38,7 +39,8 @@ void oscillatory(double alpha, double Sc,
 void advection_c(const Field2D& oc, Field2D& adv_c,
                  const Field1D& yy, const Field1D& ff,
                  long nx, long ny, double h,
-                 double Pe, double Pe2);
+                 double Pe, double Pe2,
+                 AdvectionScheme advection_scheme);
 
 void calc_phi(const Field2D& cc, Field2D& nc,
               const Field2D& adv_c, double dt,

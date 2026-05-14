@@ -1,7 +1,7 @@
-/*****************************************************************************
+﻿/*****************************************************************************
  * io.cpp
  * 
- * 鏁版嵁杈撳叆杈撳嚭鍔熻兘瀹炵幇
+ * Data input/output implementation.
  *****************************************************************************/
 
 #include "io.h"
@@ -318,7 +318,8 @@ void validate_parameter(int case_number, const Params& p)
 }  // namespace
 
 //-----------------------------------------------------------------------------
-// 鑾峰彇甯﹁緭鍑虹洰褰曞墠缂€鐨勮矾寰?//-----------------------------------------------------------------------------
+// Return a path prefixed with the output directory.
+//-----------------------------------------------------------------------------
 static std::string get_output_path(const std::string& filename)
 {
     if (config::OUTPUT_DIR.empty()) {
@@ -362,7 +363,7 @@ static fs::path find_input_parameter_file(int case_number)
 }
 
 //-----------------------------------------------------------------------------
-// 璇诲彇杈撳叆鍙傛暟
+// Read input parameters.
 //-----------------------------------------------------------------------------
 Params read_parameter(int case_number)
 {
@@ -489,7 +490,7 @@ void apply_runtime_config_from_case(int case_number, ExecutionConfig& exec_confi
 }
 
 //-----------------------------------------------------------------------------
-// 纭繚鐩綍瀛樺湪
+// Ensure the directory exists.
 //-----------------------------------------------------------------------------
 void ensure_dir(const std::string& dir)
 {
@@ -499,7 +500,7 @@ void ensure_dir(const std::string& dir)
 }
 
 //-----------------------------------------------------------------------------
-// 杈撳嚭娴撳害鍦哄拰琛ㄩ潰瑕嗙洊鐜囨暟鎹紙MATLAB 鏍煎紡锛?
+// Output concentration field and surface coverage data in MATLAB format.
 //-----------------------------------------------------------------------------
 void print_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
                 int count, const char* buf,
@@ -542,7 +543,7 @@ void print_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
 }
 
 //-----------------------------------------------------------------------------
-// 杈撳嚭 Tecplot 鏍煎紡鏁版嵁
+// Output Tecplot format data.
 //-----------------------------------------------------------------------------
 void print_tecplot_data(const Field2D& cc, int count, const char* buf,
                         long nx, long ny, double h,
@@ -594,7 +595,7 @@ void print_tecplot_data(const Field2D& cc, int count, const char* buf,
 }
 
 //-----------------------------------------------------------------------------
-// 缁熶竴鏁版嵁杈撳嚭鎺ュ彛
+// Unified data output interface.
 //-----------------------------------------------------------------------------
 void output_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
                  int count, const char* buf,
@@ -613,7 +614,7 @@ void output_data(const Field2D& phi, const Field1D& eta, const Field1D& xx,
 }
 
 //-----------------------------------------------------------------------------
-// 鍐欏叆璇︾粏杩愯鏃ュ織
+// Write detailed runtime log.
 //-----------------------------------------------------------------------------
 void write_detailed_log(const char* fname_log, int case_number,
                         const Params& p, const GridInfo& grid,

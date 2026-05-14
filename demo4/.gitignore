@@ -1,0 +1,14 @@
+# Generated demo4 diagnostics and validation artifacts.
+tools/__pycache__/
+cases/case_*/
+results/precheck/
+results/precheck_*_smoke/
+results/validation/
+results/*.csv
+results/*.json
+output/*
+
+# Keep directory documentation tracked.
+!cases/README.md
+!results/README.md
+!output/README.md

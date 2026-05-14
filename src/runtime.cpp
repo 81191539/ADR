@@ -52,6 +52,8 @@ void print_usage(const char* program)
               << "  --case N          Run one case number.\n"
               << "  --cases A,B,C     Run a comma-separated case list.\n"
               << "  --force-restart   Ignore checkpoint files and start fresh.\n"
+              << "  --cpu-thread-mode MODE    CPU scheduling: auto, case, or internal.\n"
+              << "  --advection-scheme NAME   CPU advection scheme: upwind or tvd-mc.\n"
               << "  --stats-interval N        Compute eta statistics every N iterations.\n"
               << "  --stability-check-interval N  Check field stability every N iterations.\n"
               << "  --checkpoint-interval N   Save checkpoints every N iterations.\n"
@@ -188,6 +190,56 @@ bool parse_nonnegative_double(const std::string& text, double& value, std::strin
     }
 }
 
+bool parse_cpu_thread_mode(const std::string& text,
+                           CpuThreadMode& mode,
+                           std::string& error)
+{
+    if (text == "auto" || text == "0") {
+        mode = CpuThreadMode::Auto;
+        return true;
+    }
+    if (text == "case" || text == "case-parallel" || text == "1") {
+        mode = CpuThreadMode::CaseParallel;
+        return true;
+    }
+    if (text == "internal" || text == "internal-parallel" || text == "2") {
+        mode = CpuThreadMode::InternalParallel;
+        return true;
+    }
+    error = "CPU thread mode must be auto, case, or internal: '" + text + "'.";
+    return false;
+}
+
+const char* cpu_thread_mode_name(CpuThreadMode mode)
+{
+    switch (mode) {
+    case CpuThreadMode::Auto:
+        return "auto";
+    case CpuThreadMode::CaseParallel:
+        return "case";
+    case CpuThreadMode::InternalParallel:
+        return "internal";
+    default:
+        return "unknown";
+    }
+}
+
+bool parse_advection_scheme(const std::string& text,
+                            AdvectionScheme& scheme,
+                            std::string& error)
+{
+    if (text == "upwind") {
+        scheme = AdvectionScheme::Upwind;
+        return true;
+    }
+    if (text == "tvd-mc") {
+        scheme = AdvectionScheme::TvdMc;
+        return true;
+    }
+    error = "Advection scheme must be upwind or tvd-mc: '" + text + "'.";
+    return false;
+}
+
 bool parse_runtime_args(int argc, char* argv[],
                         ExecutionConfig& exec_config,
                         bool& show_help,
@@ -205,6 +257,28 @@ bool parse_runtime_args(int argc, char* argv[],
 
         if (arg == "--force-restart") {
             exec_config.force_restart = true;
+            continue;
+        }
+
+        if (arg == "--cpu-thread-mode") {
+            if (i + 1 >= argc) {
+                error = arg + " requires a value.";
+                return false;
+            }
+            if (!parse_cpu_thread_mode(argv[++i], exec_config.cpu_thread_mode, error)) {
+                return false;
+            }
+            continue;
+        }
+
+        if (arg == "--advection-scheme") {
+            if (i + 1 >= argc) {
+                error = arg + " requires a value.";
+                return false;
+            }
+            if (!parse_advection_scheme(argv[++i], exec_config.advection_scheme, error)) {
+                return false;
+            }
             continue;
         }
 
@@ -359,6 +433,24 @@ bool parse_runtime_args(int argc, char* argv[],
         const std::string dense_start_prefix = "--dense-dump-start=";
         const std::string dense_count_prefix = "--dense-dump-count=";
         const std::string convergence_prefix = "--convergence-threshold=";
+        const std::string cpu_thread_mode_prefix = "--cpu-thread-mode=";
+        const std::string advection_scheme_prefix = "--advection-scheme=";
+        if (arg.rfind(cpu_thread_mode_prefix, 0) == 0) {
+            if (!parse_cpu_thread_mode(arg.substr(cpu_thread_mode_prefix.size()),
+                                       exec_config.cpu_thread_mode,
+                                       error)) {
+                return false;
+            }
+            continue;
+        }
+        if (arg.rfind(advection_scheme_prefix, 0) == 0) {
+            if (!parse_advection_scheme(arg.substr(advection_scheme_prefix.size()),
+                                        exec_config.advection_scheme,
+                                        error)) {
+                return false;
+            }
+            continue;
+        }
         if (arg.rfind(stats_interval_prefix, 0) == 0) {
             if (!parse_positive_long(arg.substr(stats_interval_prefix.size()),
                                      exec_config.stats_interval,
@@ -627,6 +719,44 @@ void write_dense_times_index(const fs::path& dir,
     }
 }
 
+int compute_cpu_thread_budget(int logical_processors)
+{
+    logical_processors = std::max(1, logical_processors);
+    if (config::NUM_THREADS > 0) {
+        return std::max(1, std::min(config::NUM_THREADS, logical_processors));
+    }
+
+    if (logical_processors >= 8) {
+        return logical_processors - 2;
+    }
+    return std::max(1, logical_processors - 1);
+}
+
+CpuThreadMode config_cpu_thread_mode()
+{
+    if (config::CPU_THREAD_MODE == 1) {
+        return CpuThreadMode::CaseParallel;
+    }
+    if (config::CPU_THREAD_MODE == 2) {
+        return CpuThreadMode::InternalParallel;
+    }
+    return CpuThreadMode::Auto;
+}
+
+CpuThreadMode resolve_cpu_thread_mode(const ExecutionConfig& exec_config,
+                                      std::size_t case_count)
+{
+    CpuThreadMode requested = exec_config.cpu_thread_mode;
+    if (requested == CpuThreadMode::Auto) {
+        requested = config_cpu_thread_mode();
+    }
+    if (requested == CpuThreadMode::Auto) {
+        return case_count <= 1 ? CpuThreadMode::InternalParallel
+                               : CpuThreadMode::CaseParallel;
+    }
+    return requested;
+}
+
 std::vector<long> make_dense_target_offsets(int count, double period_steps)
 {
     std::vector<long> offsets;
@@ -764,7 +894,7 @@ int run_benchmark(const ExecutionConfig& exec_config)
     #pragma omp parallel num_threads(concurrency)
     {
         const int thread_id = omp_get_thread_num();
-        auto backend = create_cpu_backend();
+        auto backend = create_cpu_backend(exec_config);
 
         std::vector<const PreparedCase*> assigned_cases;
         for (std::size_t index = static_cast<std::size_t>(thread_id);
@@ -945,6 +1075,10 @@ void case_calculation(int case_number, Params p,
 
     const bool dense_dump_enabled =
         exec_config.enable_dense_dump && exec_config.dense_dump_count > 0;
+    // The oscillatory velocity uses sin/cos(2 * alpha^2 * Sc * t), so one
+    // physical oscillation period is pi / (alpha^2 * Sc). Dense dumps
+    // intentionally cover two such periods; the default 16 snapshots are meant
+    // to give nominally 8 samples per period, not to redefine the flow period.
     const double dense_period =
         2.0 * phys::PI / (phys.alpha * phys.alpha * phys.Sc);
     const fs::path dense_root_dir = dense_dump_root_dir(case_number);
@@ -1344,6 +1478,7 @@ void case_calculation(int case_number, Params p,
     }
 
     write_detailed_log(fname_log, case_number, p, grid, phys, zone, run_log, dt_initial,
+                       exec_config.advection_scheme,
                        exec_config.output_matlab,
                        exec_config.output_tecplot);
 }
@@ -1375,6 +1510,7 @@ int run_cases_with_args(ExecutionConfig exec_config, int argc, char* argv[])
 
 int run_cases(const ExecutionConfig& exec_config)
 {
+    const int logical_processors = std::max(1, omp_get_num_procs());
     if (exec_config.backend == ComputeBackend::Cpu) {
         if (config::NUM_THREADS > 0) {
             omp_set_num_threads(config::NUM_THREADS);
@@ -1391,6 +1527,8 @@ int run_cases(const ExecutionConfig& exec_config)
               << std::endl;
     if (exec_config.backend == ComputeBackend::Cpu) {
         std::cout << "  OpenMP Threads: " << omp_get_max_threads() << std::endl;
+        std::cout << "  Advection Scheme: "
+                  << advection_scheme_name(exec_config.advection_scheme) << std::endl;
     } else {
         std::cout << "  CUDA Device: " << exec_config.device_id << std::endl;
         std::cout << "  Case Scheduling: serial on single GPU" << std::endl;
@@ -1462,13 +1600,37 @@ int run_cases(const ExecutionConfig& exec_config)
 
     int completed_cases = 0;
     int failed_cases = 0;
+    ExecutionConfig resolved_config = exec_config;
 
     if (exec_config.backend == ComputeBackend::Cpu) {
-        #pragma omp parallel for schedule(dynamic)
+        resolved_config.cpu_thread_mode =
+            resolve_cpu_thread_mode(exec_config, case_numbers.size());
+        std::cout << "CPU thread mode: "
+                  << cpu_thread_mode_name(resolved_config.cpu_thread_mode)
+                  << " (requested "
+                  << cpu_thread_mode_name(exec_config.cpu_thread_mode)
+                  << ", config "
+                  << cpu_thread_mode_name(config_cpu_thread_mode())
+                  << ")." << std::endl;
+    }
+
+    if (exec_config.backend == ComputeBackend::Cpu &&
+        resolved_config.cpu_thread_mode == CpuThreadMode::CaseParallel) {
+        const int thread_budget = compute_cpu_thread_budget(logical_processors);
+        const int max_parallel_cases =
+            std::max(1, std::min(static_cast<int>(case_numbers.size()), thread_budget));
+        omp_set_num_threads(max_parallel_cases);
+
+        std::cout << "CPU case parallelism: up to " << max_parallel_cases
+                  << " concurrent case(s), budget " << thread_budget
+                  << " of " << logical_processors << " logical processor(s)."
+                  << std::endl;
+
+        #pragma omp parallel for schedule(dynamic) num_threads(max_parallel_cases)
         for (long idx = 0; idx < static_cast<long>(case_numbers.size()); ++idx) {
             const int case_no = case_numbers[static_cast<std::size_t>(idx)];
             Params p;
-            ExecutionConfig case_exec_config = exec_config;
+            ExecutionConfig case_exec_config = resolved_config;
 
             try {
                 p = read_parameter(case_no);
@@ -1495,10 +1657,17 @@ int run_cases(const ExecutionConfig& exec_config)
             completed_cases++;
         }
     } else {
+        if (exec_config.backend == ComputeBackend::Cpu) {
+            const int thread_budget = compute_cpu_thread_budget(logical_processors);
+            omp_set_num_threads(thread_budget);
+            std::cout << "CPU internal parallelism: serial case scheduling, budget "
+                      << thread_budget << " of " << logical_processors
+                      << " logical processor(s)." << std::endl;
+        }
         for (std::size_t idx = 0; idx < case_numbers.size(); ++idx) {
             const int case_no = case_numbers[idx];
             Params p;
-            ExecutionConfig case_exec_config = exec_config;
+            ExecutionConfig case_exec_config = resolved_config;
 
             try {
                 p = read_parameter(case_no);

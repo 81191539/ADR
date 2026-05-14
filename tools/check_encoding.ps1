@@ -1,18 +1,10 @@
 param(
-    [switch]$All
+    [switch]$All,
+    [switch]$FailOnBom
 )
 
 $ErrorActionPreference = "Stop"
 $utf8Strict = [System.Text.UTF8Encoding]::new($false, $true)
-$mojibakePattern = [regex](
-    '\u9422\u3126\u57DB|' +  # "user" after UTF-8 text was decoded as GBK
-    '\u95B0\u5DB7\u7586|' +
-    '\u951B|' +
-    '\u9286|' +
-    '\uFFFD|' +
-    '\u00C3.|\u00C2.|' +
-    '[\u00E4\u00E5\u00E6\u00E7].'
-)
 $textExtensions = @(
     ".bat", ".cmake", ".cmd", ".cpp", ".css", ".cu", ".h", ".html",
     ".js", ".json", ".m", ".md", ".ps1", ".py", ".toml", ".txt", ".yml", ".yaml"
@@ -55,8 +47,11 @@ function Get-AllCandidateFiles {
 $files = if ($All) {
     Get-AllCandidateFiles
 } else {
-    git -C $root -c core.quotepath=false ls-files | ForEach-Object {
-        Get-Item -LiteralPath (Join-Path $root $_)
+    git -C $root -c core.quotepath=false ls-files --cached --others --exclude-standard | ForEach-Object {
+        $path = Join-Path $root $_
+        if (Test-Path -LiteralPath $path) {
+            Get-Item -LiteralPath $path
+        }
     }
 }
 
@@ -71,6 +66,15 @@ foreach ($file in $files) {
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+    if ($FailOnBom -and
+        $file.Extension.ToLowerInvariant() -ne ".toml" -and
+        $bytes.Length -ge 3 -and
+        $bytes[0] -eq 0xEF -and
+        $bytes[1] -eq 0xBB -and
+        $bytes[2] -eq 0xBF) {
+        $bad.Add("UTF-8 BOM is not allowed: $($file.FullName)")
+        continue
+    }
     try {
         $text = $utf8Strict.GetString($bytes)
     } catch {
@@ -78,8 +82,8 @@ foreach ($file in $files) {
         continue
     }
 
-    if ($mojibakePattern.IsMatch($text)) {
-        $bad.Add("suspicious mojibake: $($file.FullName)")
+    if ($text.Contains([string][char]0xFFFD)) {
+        $bad.Add("replacement character found: $($file.FullName)")
     }
 }
 

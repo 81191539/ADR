@@ -1,5 +1,6 @@
 # Build outputs
 build/
+build_codex*/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
@@ -25,6 +26,7 @@ df2d_cuda
 docs/html/
 output/
 results_old/
+archive/
 
 # Local archives and editor backup files
 *.zip
@@ -35,10 +37,15 @@ results_old/
 *~
 
 # Python/Web UI local state
+node_modules/
 __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Local logs
+*.log
+*_server*.log
 
 # OS/editor noise
 .DS_Store
@@ -48,3 +55,6 @@ Thumbs.db
 
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json
+
+# Local reference clones and third-party examples
+reference/

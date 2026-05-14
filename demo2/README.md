@@ -139,7 +139,7 @@ Default address:
 http://127.0.0.1:8000
 ```
 
-The Web UI builds with CMake first. It uses native `cmake` when available, then falls back to WSL with `cmake -S . -B build` and `cmake --build build --config Release --target df2d`. It runs the selected case with `--case <id>`, and the "从头重跑" option passes `--force-restart`.
+The Web UI builds with CMake first. It uses native `cmake` when available, then falls back to WSL with `cmake -S . -B build` and `cmake --build build --config Release --target df2d`. It runs the selected case with `--case <id>`, and the "run from scratch" option passes `--force-restart`.
 
 ## Tests
 

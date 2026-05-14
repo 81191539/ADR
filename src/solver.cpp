@@ -6,6 +6,7 @@
 
 #include "solver.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include <omp.h>
@@ -38,6 +39,74 @@ inline void advection_row_kernel(const double* ADR_RESTRICT oc_im,
         const double pos = du > 0.0 ? du : 0.0;
         const double neg = du < 0.0 ? du : 0.0;
         adv_i[j] = pos * back_diff + neg * fwd_diff;
+    }
+}
+
+inline double mc_limited_slope(double delta_left, double delta_right)
+{
+    if (delta_left * delta_right <= 0.0) {
+        return 0.0;
+    }
+    const double centered = 0.5 * (delta_left + delta_right);
+    const double limit = std::min(std::fabs(centered),
+                                  2.0 * std::min(std::fabs(delta_left),
+                                                 std::fabs(delta_right)));
+    return std::copysign(limit, centered);
+}
+
+inline double mc_limited_slope_from_values(double left, double center, double right)
+{
+    return mc_limited_slope(center - left, right - center);
+}
+
+inline void advection_tvd_mc_row_kernel(const double* ADR_RESTRICT oc_imm,
+                                        const double* ADR_RESTRICT oc_im,
+                                        const double* ADR_RESTRICT oc_i,
+                                        const double* ADR_RESTRICT oc_ip,
+                                        const double* ADR_RESTRICT oc_ipp,
+                                        const double* ADR_RESTRICT yy_data,
+                                        const double* ADR_RESTRICT ff_data,
+                                        double* ADR_RESTRICT adv_i,
+                                        long i, long nx, long ny,
+                                        double h_inv,
+                                        double Pe, double Pe2)
+{
+    #pragma omp simd
+    for (long j = 0; j <= ny; ++j) {
+        const double y = yy_data[j];
+        const double du = Pe * y * (1.0 - y) + Pe2 * ff_data[j];
+        double flux_right = 0.0;
+        double flux_left = 0.0;
+
+        if (du >= 0.0) {
+            double right_value = oc_i[j];
+            if (i > 0 && i < nx) {
+                right_value += 0.5 * mc_limited_slope_from_values(oc_im[j], oc_i[j], oc_ip[j]);
+            }
+
+            double left_value = oc_im[j];
+            if (i >= 2) {
+                left_value += 0.5 * mc_limited_slope_from_values(oc_imm[j], oc_im[j], oc_i[j]);
+            }
+
+            flux_right = du * right_value;
+            flux_left = du * left_value;
+        } else {
+            double right_value = oc_ip[j];
+            if (i <= nx - 2) {
+                right_value -= 0.5 * mc_limited_slope_from_values(oc_i[j], oc_ip[j], oc_ipp[j]);
+            }
+
+            double left_value = oc_i[j];
+            if (i > 0 && i < nx) {
+                left_value -= 0.5 * mc_limited_slope_from_values(oc_im[j], oc_i[j], oc_ip[j]);
+            }
+
+            flux_right = du * right_value;
+            flux_left = du * left_value;
+        }
+
+        adv_i[j] = (flux_right - flux_left) * h_inv;
     }
 }
 
@@ -95,7 +164,8 @@ void full_step_explicit(SimFields& fields,
                         const GridInfo& grid,
                         const PhysicsParams& phys,
                         const AdsorptionZone& zone,
-                        double ct, double dt)
+                        double ct, double dt,
+                        AdvectionScheme advection_scheme)
 {
     calc_eta(fields.ee, fields.ne, fields.cc, dt,
              grid.nx, grid.h, zone.xpo_l, zone.xpo_r,
@@ -108,7 +178,7 @@ void full_step_explicit(SimFields& fields,
     oscillatory(phys.alpha, phys.Sc, fields.ff, fields.yy, ct, grid.ny);
 
     advection_c(fields.cc, fields.adv_c, fields.yy, fields.ff,
-                grid.nx, grid.ny, grid.h, phys.Pe, phys.Pe2);
+                grid.nx, grid.ny, grid.h, phys.Pe, phys.Pe2, advection_scheme);
 
     calc_phi(fields.cc, fields.nc, fields.adv_c, dt,
              grid.nx, grid.ny, grid.h);
@@ -235,20 +305,37 @@ void oscillatory(double alpha, double Sc,
 void advection_c(const Field2D& oc, Field2D& adv_c,
                  const Field1D& yy, const Field1D& ff,
                  long nx, long ny, double h,
-                 double Pe, double Pe2)
+                 double Pe, double Pe2,
+                 AdvectionScheme advection_scheme)
 {
     const double h_inv = 1.0 / h;
     const double* yy_data = yy.physical_data();
     const double* ff_data = ff.physical_data();
 
+    if (advection_scheme == AdvectionScheme::Upwind) {
+        #pragma omp parallel for schedule(static)
+        for (long i = 0; i <= nx; ++i) {
+            const double* oc_im = oc.physical_row_data(i - 1);
+            const double* oc_i = oc.physical_row_data(i);
+            const double* oc_ip = oc.physical_row_data(i + 1);
+            double* adv_i = adv_c.physical_row_data(i);
+            advection_row_kernel(oc_im, oc_i, oc_ip, yy_data, ff_data, adv_i,
+                                 ny, h_inv, Pe, Pe2);
+        }
+        return;
+    }
+
     #pragma omp parallel for schedule(static)
     for (long i = 0; i <= nx; ++i) {
+        const double* oc_imm = i >= 2 ? oc.physical_row_data(i - 2) : nullptr;
         const double* oc_im = oc.physical_row_data(i - 1);
         const double* oc_i = oc.physical_row_data(i);
         const double* oc_ip = oc.physical_row_data(i + 1);
+        const double* oc_ipp = i <= nx - 2 ? oc.physical_row_data(i + 2) : nullptr;
         double* adv_i = adv_c.physical_row_data(i);
-        advection_row_kernel(oc_im, oc_i, oc_ip, yy_data, ff_data, adv_i,
-                             ny, h_inv, Pe, Pe2);
+        advection_tvd_mc_row_kernel(oc_imm, oc_im, oc_i, oc_ip, oc_ipp,
+                                    yy_data, ff_data, adv_i,
+                                    i, nx, ny, h_inv, Pe, Pe2);
     }
 }
 

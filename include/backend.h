@@ -38,7 +38,7 @@ public:
 };
 
 std::unique_ptr<SolverBackend> create_backend(const ExecutionConfig& config);
-std::unique_ptr<SolverBackend> create_cpu_backend();
+std::unique_ptr<SolverBackend> create_cpu_backend(const ExecutionConfig& config);
 
 #ifdef ADR_ENABLE_CUDA
 std::unique_ptr<SolverBackend> create_cuda_backend(const ExecutionConfig& config);
