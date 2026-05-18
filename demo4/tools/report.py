@@ -52,9 +52,10 @@ def display_variant_name(variant: str, ny: int | None, *, ny_sweep_only: bool) -
 
 def enrich_validation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sweep_variants = {"baseline", "ny_refined_1", "ny_refined_2", "ny_refined_3", "ny_refined"}
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
-        grouped.setdefault(str(row.get("case_id", "") or ""), []).append(row)
+        scheme_name = str(row.get("advection_scheme", "") or "").strip() or "upwind"
+        grouped.setdefault((str(row.get("case_id", "") or ""), scheme_name), []).append(row)
     for group_rows in grouped.values():
         ny_sweep_only = bool(group_rows) and all(str(row.get("variant", "")) in sweep_variants for row in group_rows)
         for row in group_rows:
@@ -88,11 +89,20 @@ def enrich_curve_metric_rows(
     validation_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     validation_lookup = {
-        (str(row.get("case_id", "") or ""), str(row.get("variant", "") or "")): row
+        (
+            str(row.get("case_id", "") or ""),
+            str(row.get("advection_scheme", "") or "upwind"),
+            str(row.get("variant", "") or ""),
+        ): row
         for row in validation_rows
     }
     for row in curve_rows:
-        validation_row = validation_lookup.get((str(row.get("case_id", "") or ""), str(row.get("variant", "") or "")))
+        key = (
+            str(row.get("case_id", "") or ""),
+            str(row.get("advection_scheme", "") or "upwind"),
+            str(row.get("variant", "") or ""),
+        )
+        validation_row = validation_lookup.get(key)
         if validation_row is None:
             continue
         for field in [
@@ -123,6 +133,7 @@ def main() -> int:
         read_csv_rows(results_dir / "curve_metrics_summary.csv"),
         validation_summary,
     )
+    scheme_comparison_summary = read_csv_rows(results_dir / "scheme_comparison_summary.csv")
     validation_details = []
     validation_root = results_dir / "validation"
     if validation_root.exists():
@@ -137,6 +148,8 @@ def main() -> int:
         "validation_rows": validation_summary,
         "curve_metrics_summary_path": str(results_dir / "curve_metrics_summary.csv"),
         "curve_metric_rows": curve_metrics_summary,
+        "scheme_comparison_summary_path": str(results_dir / "scheme_comparison_summary.csv"),
+        "scheme_comparison_rows": scheme_comparison_summary,
         "validation_details": validation_details,
         "selection_policy": "No automatic scheme selection is performed. Compare rows manually.",
     }

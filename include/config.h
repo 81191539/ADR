@@ -61,7 +61,7 @@ namespace config {
      * - 0  = 自动检测，使用系统最大可用线程数（默认）
      * - >0 = 使用指定的线程数
      */
-    constexpr int NUM_THREADS = 20;
+    constexpr int NUM_THREADS = 22;
 
     /**
      * @brief CPU threading strategy

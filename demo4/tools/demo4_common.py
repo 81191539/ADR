@@ -421,8 +421,8 @@ def candidate_scheme_rows() -> list[dict[str, Any]]:
             "expected_benefit": "Targets artificial diffusion in convection-dominated cases.",
             "expected_cost": "Does not by itself remove explicit time-step limits.",
             "implementation_risk": "Medium",
-            "status": "theoretical",
-            "evidence": "No measured solver output yet; keep as a candidate route until implementation and validation evidence exist.",
+            "status": "measurable",
+            "evidence": "Implemented as TVD-MC advection in the CPU solver; demo4 validation can now compare it against upwind under identical case and refinement conditions.",
             "metrics_to_inspect": [
                 "grid refinement sensitivity",
                 "negative concentration events",

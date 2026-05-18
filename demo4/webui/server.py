@@ -2456,6 +2456,7 @@ def demo4_latest_validation_run(kind: str) -> dict[str, Any] | None:
         "summary": summary or {},
         "validationCsv": str(run_path / "validation_summary.csv"),
         "curveMetricsCsv": str(run_path / "curve_metrics_summary.csv"),
+        "schemeComparisonCsv": str(run_path / "scheme_comparison_summary.csv"),
     }
 
 
@@ -2655,9 +2656,11 @@ def demo4_progress_rows_for_validation(
     case_ids: list[int],
     selected_variants: list[str],
     ny_refine: int,
-    advection_scheme: str = "upwind",
+    advection_schemes: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     ny_sweep_variants = {"baseline", "ny_refined_1", "ny_refined_2", "ny_refined_3", "ny_refined"}
+    schemes = advection_schemes or ["upwind"]
+    use_scheme_subdir = len(schemes) > 1
     rows: list[dict[str, Any]] = []
     for case_id in case_ids:
         variants = list(selected_variants)
@@ -2671,33 +2674,45 @@ def demo4_progress_rows_for_validation(
                 target_ny = int(round(base_ny * ny_refine))
                 levels = demo4_geometric_ny_levels(base_ny, target_ny, 5)
                 variants = [demo4_ny_variant_name(index, len(levels)) for index, _ in enumerate(levels)]
-                rows.extend({
-                    "case": case_id,
-                    "advection_scheme": advection_scheme,
-                    "scheme_display": DEMO4_ADVECTION_SCHEME_LABELS.get(advection_scheme, advection_scheme),
-                    "variant": variant,
-                    "ny": ny,
-                    "display_variant": "baseline" if variant == "baseline" else f"ny_{ny}",
-                } for variant, ny in zip(variants, levels, strict=False))
+                for scheme in schemes:
+                    rows.extend({
+                        "case": case_id,
+                        "advection_scheme": scheme,
+                        "scheme_display": DEMO4_ADVECTION_SCHEME_LABELS.get(scheme, scheme),
+                        "variant": variant,
+                        "work_subdir": (
+                            f"case_{case_id:04d}/{scheme}/{variant}"
+                            if use_scheme_subdir
+                            else f"case_{case_id:04d}/{variant}"
+                        ),
+                        "ny": ny,
+                        "display_variant": "baseline" if variant == "baseline" else f"ny_{ny}",
+                    } for variant, ny in zip(variants, levels, strict=False))
                 continue
-        for variant in variants:
-            ny_value = base_ny
-            if base_ny is not None and variant in {"ny_refined", "dt_ny_refined"}:
-                ny_value = int(round(base_ny * ny_refine))
-            display_variant = variant
-            if ny_value is not None:
-                if variant.startswith("ny_refined"):
-                    display_variant = f"ny_{ny_value}"
-                elif variant == "dt_ny_refined":
-                    display_variant = f"dt+ny_{ny_value}"
-            rows.append({
-                "case": case_id,
-                "advection_scheme": advection_scheme,
-                "scheme_display": DEMO4_ADVECTION_SCHEME_LABELS.get(advection_scheme, advection_scheme),
-                "variant": variant,
-                "ny": ny_value,
-                "display_variant": display_variant,
-            })
+        for scheme in schemes:
+            for variant in variants:
+                ny_value = base_ny
+                if base_ny is not None and variant in {"ny_refined", "dt_ny_refined"}:
+                    ny_value = int(round(base_ny * ny_refine))
+                display_variant = variant
+                if ny_value is not None:
+                    if variant.startswith("ny_refined"):
+                        display_variant = f"ny_{ny_value}"
+                    elif variant == "dt_ny_refined":
+                        display_variant = f"dt+ny_{ny_value}"
+                rows.append({
+                    "case": case_id,
+                    "advection_scheme": scheme,
+                    "scheme_display": DEMO4_ADVECTION_SCHEME_LABELS.get(scheme, scheme),
+                    "variant": variant,
+                    "work_subdir": (
+                        f"case_{case_id:04d}/{scheme}/{variant}"
+                        if use_scheme_subdir
+                        else f"case_{case_id:04d}/{variant}"
+                    ),
+                    "ny": ny_value,
+                    "display_variant": display_variant,
+                })
     return rows
 
 
@@ -2720,28 +2735,31 @@ def demo4_numeric_value(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def demo4_validation_lookup(started_epoch: float | None) -> dict[tuple[int, str], dict[str, Any]]:
-    lookup: dict[tuple[int, str], dict[str, Any]] = {}
+def demo4_validation_lookup(started_epoch: float | None) -> dict[tuple[int, str, str], dict[str, Any]]:
+    lookup: dict[tuple[int, str, str], dict[str, Any]] = {}
     for row in read_csv_rows(DEMO4_RESULTS_DIR / "validation_summary.csv"):
         case_value = demo4_numeric_value(row.get("case_id"))
+        scheme = str(row.get("advection_scheme", "") or "upwind")
         variant = str(row.get("variant", "") or "")
         if case_value is None or not variant:
             continue
         eta_path = Path(str(row.get("eta_path", "") or "")) if row.get("eta_path") else None
         if eta_path is not None and started_epoch is not None and eta_path.exists() and eta_path.stat().st_mtime + 1.0 < started_epoch:
             continue
-        lookup[(int(case_value), variant)] = row
+        lookup[(int(case_value), scheme, variant)] = row
     return lookup
 
 
 def demo4_variant_runtime_seconds(
     case_id: int,
+    advection_scheme: str,
     variant: str,
+    work_subdir: str,
     row_status: str,
     started_epoch: float | None,
-    validation_lookup: dict[tuple[int, str], dict[str, Any]],
+    validation_lookup: dict[tuple[int, str, str], dict[str, Any]],
 ) -> float | None:
-    summary_row = validation_lookup.get((case_id, variant))
+    summary_row = validation_lookup.get((case_id, advection_scheme, variant))
     if summary_row is not None:
         elapsed = demo4_numeric_value(summary_row.get("elapsed_seconds"))
         if elapsed is not None:
@@ -2751,8 +2769,7 @@ def demo4_variant_runtime_seconds(
     input_path = (
         DEMO4_ROOT
         / "cases"
-        / f"case_{case_id:04d}"
-        / variant
+        / work_subdir
         / "input"
         / f"input_parameter_{case_id:04d}.toml"
     )
@@ -2777,6 +2794,7 @@ def demo4_validation_progress(task: dict[str, Any]) -> dict[str, Any] | None:
             "advection_scheme": str(row.get("advection_scheme") or "upwind"),
             "scheme_display": str(row.get("scheme_display") or DEMO4_ADVECTION_SCHEME_LABELS["upwind"]),
             "variant": str(row["variant"]),
+            "work_subdir": str(row.get("work_subdir") or f"case_{int(row['case']):04d}/{row['variant']}"),
             "display_variant": row.get("display_variant"),
             "ny": row.get("ny"),
         }
@@ -2799,12 +2817,13 @@ def demo4_validation_progress(task: dict[str, Any]) -> dict[str, Any] | None:
     total_percent = 0.0
     for plan_row in plan_rows:
         case_id = int(plan_row["case"])
+        advection_scheme = str(plan_row.get("advection_scheme") or "upwind")
         variant = str(plan_row["variant"])
+        work_subdir = str(plan_row.get("work_subdir") or f"case_{case_id:04d}/{variant}")
         work_eta = (
             DEMO4_ROOT
             / "cases"
-            / f"case_{case_id:04d}"
-            / variant
+            / work_subdir
             / "output"
             / f"eta_ave_{case_id}.m"
         )
@@ -2829,7 +2848,9 @@ def demo4_validation_progress(task: dict[str, Any]) -> dict[str, Any] | None:
             row_status = "partial"
         elapsed_seconds = demo4_variant_runtime_seconds(
             case_id,
+            advection_scheme,
             variant,
+            work_subdir,
             row_status,
             started_epoch,
             validation_lookup,
@@ -2837,9 +2858,10 @@ def demo4_validation_progress(task: dict[str, Any]) -> dict[str, Any] | None:
         total_percent += percent
         rows.append({
             "case": case_id,
-            "advection_scheme": str(plan_row.get("advection_scheme") or "upwind"),
+            "advection_scheme": advection_scheme,
             "scheme_display": str(plan_row.get("scheme_display") or DEMO4_ADVECTION_SCHEME_LABELS["upwind"]),
             "variant": variant,
+            "work_subdir": work_subdir,
             "display_variant": str(plan_row.get("display_variant") or variant),
             "ny": plan_row.get("ny"),
             "time": final_time,
@@ -2879,10 +2901,11 @@ def demo4_display_variant_name(variant: str, ny: int | None, *, ny_sweep_only: b
 
 def demo4_enrich_validation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sweep_variants = {"baseline", "ny_refined_1", "ny_refined_2", "ny_refined_3", "ny_refined"}
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
         case_id = str(row.get("case_id", "") or "")
-        grouped.setdefault(case_id, []).append(row)
+        scheme_name = str(row.get("advection_scheme", "") or "").strip() or "upwind"
+        grouped.setdefault((case_id, scheme_name), []).append(row)
 
     for group_rows in grouped.values():
         ny_sweep_only = bool(group_rows) and all(str(row.get("variant", "")) in sweep_variants for row in group_rows)
@@ -2926,11 +2949,19 @@ def demo4_enrich_curve_metric_rows(
     validation_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     validation_lookup = {
-        (str(row.get("case_id", "") or ""), str(row.get("variant", "") or "")): row
+        (
+            str(row.get("case_id", "") or ""),
+            str(row.get("advection_scheme", "") or "upwind"),
+            str(row.get("variant", "") or ""),
+        ): row
         for row in validation_rows
     }
     for row in curve_rows:
-        key = (str(row.get("case_id", "") or ""), str(row.get("variant", "") or ""))
+        key = (
+            str(row.get("case_id", "") or ""),
+            str(row.get("advection_scheme", "") or "upwind"),
+            str(row.get("variant", "") or ""),
+        )
         validation_row = validation_lookup.get(key)
         if validation_row is None:
             continue
@@ -2954,6 +2985,7 @@ def demo4_status_payload() -> dict[str, Any]:
     precheck_csv = DEMO4_RESULTS_DIR / "precheck_summary.csv"
     validation_csv = DEMO4_RESULTS_DIR / "validation_summary.csv"
     curve_metrics_csv = DEMO4_RESULTS_DIR / "curve_metrics_summary.csv"
+    scheme_comparison_csv = DEMO4_RESULTS_DIR / "scheme_comparison_summary.csv"
     summary_json = DEMO4_RESULTS_DIR / "demo4_summary.json"
     latest_runs = demo4_latest_validation_runs()
     return {
@@ -2964,6 +2996,7 @@ def demo4_status_payload() -> dict[str, Any]:
             "precheckSummary": demo4_file_status(precheck_csv),
             "validationSummary": demo4_file_status(validation_csv),
             "curveMetricsSummary": demo4_file_status(curve_metrics_csv),
+            "schemeComparisonSummary": demo4_file_status(scheme_comparison_csv),
             "combinedSummary": demo4_file_status(summary_json),
         },
     }
@@ -2975,11 +3008,17 @@ def demo4_results_payload() -> dict[str, Any]:
     default_run = demo4_default_validation_run(latest_runs)
     validation_csv = Path(str(default_run.get("validationCsv"))) if default_run else DEMO4_RESULTS_DIR / "validation_summary.csv"
     curve_metrics_csv = Path(str(default_run.get("curveMetricsCsv"))) if default_run else DEMO4_RESULTS_DIR / "curve_metrics_summary.csv"
+    scheme_comparison_csv = Path(str(default_run.get("schemeComparisonCsv"))) if default_run else DEMO4_RESULTS_DIR / "scheme_comparison_summary.csv"
     summary_json = DEMO4_RESULTS_DIR / "demo4_summary.json"
     summary_payload = read_json_file(summary_json)
     precheck_rows = read_csv_rows(precheck_csv)
     validation_rows = demo4_enrich_validation_rows(read_csv_rows(validation_csv))
     curve_metric_rows = demo4_enrich_curve_metric_rows(read_csv_rows(curve_metrics_csv), validation_rows)
+    scheme_comparison_rows = read_csv_rows(scheme_comparison_csv)
+    if not scheme_comparison_rows and isinstance(summary_payload, dict):
+        summary_comparison_rows = summary_payload.get("scheme_comparison_rows", [])
+        if isinstance(summary_comparison_rows, list):
+            scheme_comparison_rows = summary_comparison_rows
     current_precheck_case_ids = {
         str(row.get("case_id", "")).strip()
         for row in precheck_rows
@@ -3009,6 +3048,7 @@ def demo4_results_payload() -> dict[str, Any]:
         "precheckRows": precheck_rows,
         "validationRows": validation_rows,
         "curveMetricRows": curve_metric_rows,
+        "schemeComparisonRows": scheme_comparison_rows,
         "etaSeries": demo4_eta_series_payload(validation_rows),
         "precheckDetails": precheck_details,
         "summary": summary_payload or {},
@@ -3253,6 +3293,15 @@ def launch_demo4_validation(payload: dict[str, Any]) -> dict[str, Any]:
     ny_refine = int(float(payload.get("nyRefine", 2)))
     timeout_seconds = float(payload.get("timeoutSeconds", 300.0))
     advection_scheme = str(payload.get("advectionScheme", "upwind") or "upwind").strip()
+    payload_schemes = payload.get("advectionSchemes")
+    if isinstance(payload_schemes, list):
+        advection_schemes = [str(item).strip() for item in payload_schemes if str(item).strip()]
+    elif isinstance(payload_schemes, str) and payload_schemes.strip():
+        advection_schemes = [item.strip() for item in payload_schemes.split(",") if item.strip()]
+    elif advection_scheme == "compare":
+        advection_schemes = ["upwind", "tvd-mc"]
+    else:
+        advection_schemes = [advection_scheme]
     variants = payload.get("variants")
     if isinstance(variants, list):
         selected_variants = [str(item).strip() for item in variants if str(item).strip()]
@@ -3271,8 +3320,9 @@ def launch_demo4_validation(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if any(item not in allowed_variants for item in selected_variants):
         raise ValueError("Invalid demo4 validation variants.")
-    if advection_scheme not in DEMO4_ADVECTION_SCHEME_LABELS:
+    if not advection_schemes or any(scheme not in DEMO4_ADVECTION_SCHEME_LABELS for scheme in advection_schemes):
         raise ValueError("Invalid demo4 advection scheme.")
+    advection_schemes = list(dict.fromkeys(advection_schemes))
     case_ids = parse_demo4_case_ids(cases)
     if not case_ids:
         raise ValueError("demo4 validation requires at least one case id or range.")
@@ -3313,20 +3363,21 @@ def launch_demo4_validation(payload: dict[str, Any]) -> dict[str, Any]:
         str(timeout_seconds),
         "--kind",
         validation_kind,
-        "--advection-scheme",
-        advection_scheme,
+        "--advection-schemes",
+        ",".join(advection_schemes),
     ]
     solver = str(payload.get("solver", "") or "").strip()
     if solver:
         command.extend(["--solver", solver])
     validation_plan = {
         "kind": validation_kind,
-        "advectionScheme": advection_scheme,
-        "schemeDisplay": DEMO4_ADVECTION_SCHEME_LABELS.get(advection_scheme, advection_scheme),
+        "advectionScheme": advection_schemes[0],
+        "advectionSchemes": advection_schemes,
+        "schemeDisplay": ", ".join(DEMO4_ADVECTION_SCHEME_LABELS.get(scheme, scheme) for scheme in advection_schemes),
         "inputDir": input_dir,
         "caseIds": case_ids,
         "variants": selected_variants,
-        "rows": demo4_progress_rows_for_validation(input_dir, case_ids, selected_variants, ny_refine, advection_scheme),
+        "rows": demo4_progress_rows_for_validation(input_dir, case_ids, selected_variants, ny_refine, advection_schemes),
         "maxEndT": max_end_t,
     }
     return launch_demo4_command("validation", command, validation_plan)

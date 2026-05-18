@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDE Solver UI</title>
-  <link rel="stylesheet" href="/styles.css?v=demo4-20260514-advect-1">
+  <link rel="stylesheet" href="/styles.css?v=demo4-20260514-advect-compare-1">
 </head>
 <body>
   <div class="page-shell">
@@ -517,6 +517,7 @@
                     <label>
                       <span>advection scheme</span>
                       <select id="demo4-validation-advection-scheme">
+                        <option value="compare">Upwind vs TVD-MC</option>
                         <option value="upwind">Baseline Upwind</option>
                         <option value="tvd-mc">High-Resolution (TVD-MC)</option>
                       </select>
@@ -588,6 +589,10 @@
                 <div class="table-wrap"><table class="preview-table"><tbody id="demo4-curve-metrics-body"><tr><td>No curve metrics.</td></tr></tbody></table></div>
               </section>
               <section class="chart-card">
+                <h3>Upwind vs TVD-MC</h3>
+                <div class="table-wrap"><table class="preview-table"><tbody id="demo4-scheme-comparison-body"><tr><td>No scheme comparison results.</td></tr></tbody></table></div>
+              </section>
+              <section class="chart-card">
                 <h3>Validation Summary</h3>
                 <div class="table-wrap"><table class="preview-table"><tbody id="demo4-validation-body"><tr><td>No validation results.</td></tr></tbody></table></div>
               </section>
@@ -598,6 +603,6 @@
     </main>
   </div>
 
-  <script src="/app.js?v=demo4-20260514-advect-1" defer></script>
+  <script src="/app.js?v=demo4-20260514-advect-compare-1" defer></script>
 </body>
 </html>

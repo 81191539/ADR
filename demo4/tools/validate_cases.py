@@ -111,12 +111,46 @@ CURVE_METRIC_FIELDS = [
     "common_time_end",
 ]
 
+SCHEME_COMPARISON_FIELDS = [
+    "run_id",
+    "validation_kind",
+    "case_id",
+    "variant",
+    "display_variant",
+    "ny",
+    "coeff_dt",
+    "baseline_scheme",
+    "comparison_scheme",
+    "comparison_status",
+    "upwind_exit_code",
+    "tvd_mc_exit_code",
+    "final_time_upwind",
+    "final_time_tvd_mc",
+    "final_eta_upwind",
+    "final_eta_tvd_mc",
+    "final_eta_delta",
+    "final_eta_delta_abs",
+    "final_eta_delta_rel",
+    "rmse_abs",
+    "rmse_rel",
+    "linf_abs",
+    "linf_rel",
+    "auc_abs_diff",
+    "auc_rel_diff",
+    "common_time_end",
+    "upwind_elapsed_seconds",
+    "tvd_mc_elapsed_seconds",
+    "runtime_ratio_tvd_mc_vs_upwind",
+]
+
 REMARK_NUMERIC_FIELDS = {
     "actual_iterations",
     "iterations_per_second",
     "time_total",
 }
 
+VALIDATION_CHECKPOINT_INTERVAL = 2147483647
+CUDA_NY_AUTO_THRESHOLD = 100
 
 def geometric_ny_levels(base_ny: int, target_ny: int, count: int = 5) -> list[int]:
     if count < 2:
@@ -173,6 +207,21 @@ def planned_variants_for_case(
     return selected_variants
 
 
+def max_planned_ny_for_cases(
+    selected_cases: list[Any],
+    selected_variants: list[str],
+    ny_refine: int,
+) -> int:
+    max_ny = 0
+    for case in selected_cases:
+        values = read_case(case.path)
+        for variant in planned_variants_for_case(selected_variants, values, ny_refine):
+            ny_override = ny_override_for_variant(values, variant, ny_refine)
+            variant_case = variant_values(values, variant, 2.0, ny_refine, ny_override)
+            max_ny = max(max_ny, int(variant_case["ny"]))
+    return max_ny
+
+
 def infer_validation_kind(selected_variants: list[str]) -> str:
     variants = set(selected_variants)
     if variants and variants.issubset(set(NY_SWEEP_VARIANTS)):
@@ -223,14 +272,19 @@ def variant_values(
 
 def prepare_variant(
     case_id: int,
+    advection_scheme: str,
     values: dict[str, Any],
     variant: str,
     run_root: Path,
     dt_refine: float,
     ny_refine: int,
     max_end_t: float | None,
+    use_scheme_subdir: bool = False,
 ) -> tuple[Path, Path, dict[str, Any]]:
-    case_variant_root = CASES_ROOT / f"case_{case_id:04d}" / variant
+    case_variant_root = CASES_ROOT / f"case_{case_id:04d}"
+    if use_scheme_subdir:
+        case_variant_root = case_variant_root / advection_scheme
+    case_variant_root = case_variant_root / variant
     copy_or_clean_dir(case_variant_root)
     input_dir = ensure_dir(case_variant_root / "input")
     ensure_dir(case_variant_root / "output")
@@ -241,7 +295,10 @@ def prepare_variant(
         int(variant_case["ny"]),
         ny_sweep_only=variant in NY_SWEEP_VARIANTS,
     )
-    result_variant_root = run_root / f"case_{case_id:04d}" / result_variant_name
+    result_case_root = run_root / f"case_{case_id:04d}"
+    if use_scheme_subdir:
+        result_case_root = result_case_root / advection_scheme
+    result_variant_root = result_case_root / result_variant_name
     ensure_dir(result_variant_root)
     if max_end_t is not None:
         variant_case["endT"] = max_end_t
@@ -311,9 +368,32 @@ def ensure_auto_solver_current(solver: Path) -> Path:
     return locate_solver(None)
 
 
-def resolve_validation_solver(explicit_solver: str | None) -> Path:
+def locate_cuda_solver() -> Path | None:
+    candidates = [
+        resolve_path("build/Release/df2d_cuda.exe"),
+        resolve_path("build/Debug/df2d_cuda.exe"),
+        resolve_path("build/RelWithDebInfo/df2d_cuda.exe"),
+        resolve_path("build/df2d_cuda.exe"),
+        resolve_path("build/df2d_cuda"),
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def resolve_validation_solver(explicit_solver: str | None, solver_backend: str = "auto", prefer_cuda: bool = False) -> Path:
     if explicit_solver:
         return locate_solver(explicit_solver)
+    if solver_backend == "cuda":
+        solver = locate_cuda_solver()
+        if solver is None:
+            raise FileNotFoundError("Could not find df2d_cuda solver for --solver-backend cuda.")
+        return solver
+    if solver_backend == "auto" and prefer_cuda:
+        solver = locate_cuda_solver()
+        if solver is not None:
+            return solver
     try:
         solver = locate_solver(None)
     except FileNotFoundError:
@@ -588,6 +668,121 @@ def add_curve_metrics(rows: list[dict[str, Any]], max_end_t: float | None) -> li
     return [curve_metric_row(row, reference, max_end_t) for row in rows]
 
 
+def condition_key(row: dict[str, Any]) -> tuple[Any, str, int | None, float | None]:
+    ny = row.get("ny")
+    coeff_dt = row.get("coeff_dt")
+    return (
+        row.get("case_id"),
+        str(row.get("variant", "")),
+        int(ny) if isinstance(ny, (int, float)) else None,
+        round(float(coeff_dt), 14) if isinstance(coeff_dt, (int, float)) else None,
+    )
+
+
+def scheme_comparison_row(
+    upwind_row: dict[str, Any],
+    tvd_row: dict[str, Any],
+    max_end_t: float | None,
+) -> dict[str, Any]:
+    upwind_eta = upwind_row.get("final_eta")
+    tvd_eta = tvd_row.get("final_eta")
+    final_delta = (
+        tvd_eta - upwind_eta
+        if isinstance(upwind_eta, (int, float)) and isinstance(tvd_eta, (int, float))
+        else None
+    )
+    metric = curve_metric_row(tvd_row, upwind_row, max_end_t)
+    upwind_elapsed = upwind_row.get("elapsed_seconds")
+    tvd_elapsed = tvd_row.get("elapsed_seconds")
+    runtime_ratio = (
+        tvd_elapsed / upwind_elapsed
+        if isinstance(upwind_elapsed, (int, float))
+        and isinstance(tvd_elapsed, (int, float))
+        and upwind_elapsed > 0.0
+        else None
+    )
+    return {
+        "case_id": tvd_row.get("case_id"),
+        "variant": tvd_row.get("variant"),
+        "display_variant": tvd_row.get("display_variant"),
+        "ny": tvd_row.get("ny"),
+        "coeff_dt": tvd_row.get("coeff_dt"),
+        "baseline_scheme": "upwind",
+        "comparison_scheme": "tvd-mc",
+        "comparison_status": metric.get("comparison_status"),
+        "upwind_exit_code": upwind_row.get("exit_code"),
+        "tvd_mc_exit_code": tvd_row.get("exit_code"),
+        "final_time_upwind": upwind_row.get("final_time"),
+        "final_time_tvd_mc": tvd_row.get("final_time"),
+        "final_eta_upwind": upwind_eta,
+        "final_eta_tvd_mc": tvd_eta,
+        "final_eta_delta": final_delta,
+        "final_eta_delta_abs": abs(final_delta) if isinstance(final_delta, (int, float)) else None,
+        "final_eta_delta_rel": (
+            abs(final_delta) / max(abs(upwind_eta), 1e-14)
+            if isinstance(final_delta, (int, float)) and isinstance(upwind_eta, (int, float))
+            else None
+        ),
+        "rmse_abs": metric.get("rmse_abs"),
+        "rmse_rel": metric.get("rmse_rel"),
+        "linf_abs": metric.get("linf_abs"),
+        "linf_rel": metric.get("linf_rel"),
+        "auc_abs_diff": metric.get("auc_abs_diff"),
+        "auc_rel_diff": metric.get("auc_rel_diff"),
+        "common_time_end": metric.get("common_time_end"),
+        "upwind_elapsed_seconds": upwind_elapsed,
+        "tvd_mc_elapsed_seconds": tvd_elapsed,
+        "runtime_ratio_tvd_mc_vs_upwind": runtime_ratio,
+    }
+
+
+def add_scheme_comparisons(rows: list[dict[str, Any]], max_end_t: float | None) -> list[dict[str, Any]]:
+    upwind_rows = {
+        condition_key(row): row
+        for row in rows
+        if row.get("advection_scheme") == "upwind"
+    }
+    comparisons: list[dict[str, Any]] = []
+    for tvd_row in rows:
+        if tvd_row.get("advection_scheme") != "tvd-mc":
+            continue
+        upwind_row = upwind_rows.get(condition_key(tvd_row))
+        if upwind_row is None:
+            continue
+        comparisons.append(scheme_comparison_row(upwind_row, tvd_row, max_end_t))
+    return comparisons
+
+
+def parse_advection_schemes(advection_scheme: str, advection_schemes: str | None) -> list[str]:
+    raw_items = advection_schemes if advection_schemes is not None else advection_scheme
+    schemes = [item.strip() for item in str(raw_items).split(",") if item.strip()]
+    if not schemes:
+        schemes = [advection_scheme]
+    unknown = [scheme for scheme in schemes if scheme not in ADVECTION_SCHEME_LABELS]
+    if unknown:
+        raise ValueError(f"Unknown advection scheme(s): {', '.join(unknown)}")
+    ordered: list[str] = []
+    for scheme in schemes:
+        if scheme not in ordered:
+            ordered.append(scheme)
+    return ordered
+
+
+def validation_solver_args(advection_scheme: str, keep_solver_artifacts: bool) -> list[str]:
+    args = [
+        "--cpu-thread-mode", "internal",
+        "--advection-scheme", advection_scheme,
+    ]
+    if not keep_solver_artifacts:
+        args.extend([
+            "--no-output-matlab",
+            "--no-output-tecplot",
+            "--disable-dense-dump",
+            "--checkpoint-interval", str(VALIDATION_CHECKPOINT_INTERVAL),
+        ])
+    return args
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="demo4 baseline refinement validation.")
     parser.add_argument("--input-dir", default="demo4/input", help="Directory containing input_parameter_XXXX files.")
@@ -600,6 +795,9 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=float, default=300.0, help="Per-variant solver timeout.")
     parser.add_argument("--kind", choices=["dt", "ny", "mixed"], default="", help="Validation run kind used for timestamped result archival.")
     parser.add_argument("--advection-scheme", choices=sorted(ADVECTION_SCHEME_LABELS), default="upwind", help="CPU advection scheme passed to the solver.")
+    parser.add_argument("--advection-schemes", default="", help="Comma-separated CPU advection schemes to run under identical case/variant conditions.")
+    parser.add_argument("--solver-backend", choices=["auto", "cpu", "cuda"], default="auto", help="Solver executable family used when --solver is omitted. Auto prefers CUDA for fine upwind grids when available.")
+    parser.add_argument("--keep-solver-artifacts", action="store_true", help="Keep full field snapshots, dense dumps, and checkpoints during validation.")
     args = parser.parse_args()
 
     selected_variants = [item.strip() for item in args.variants.split(",") if item.strip()]
@@ -615,10 +813,18 @@ def main() -> int:
         raise ValueError("--dt-refine must be greater than 1.")
     if needs_ny_refine and args.ny_refine <= 1:
         raise ValueError("--ny-refine must be greater than 1.")
+    advection_schemes = parse_advection_schemes(args.advection_scheme, args.advection_schemes or None)
+    use_scheme_subdir = len(advection_schemes) > 1
     input_dir = resolve_path(args.input_dir)
     available = discover_cases(input_dir)
     selected = parse_case_selection(args.cases, available)
-    solver = resolve_validation_solver(args.solver or None)
+    max_planned_ny = max_planned_ny_for_cases(selected, selected_variants, args.ny_refine)
+    prefer_cuda = (
+        args.solver_backend == "auto" and
+        max_planned_ny >= CUDA_NY_AUTO_THRESHOLD and
+        advection_schemes == ["upwind"]
+    )
+    solver = resolve_validation_solver(args.solver or None, args.solver_backend, prefer_cuda)
     validation_kind = args.kind or infer_validation_kind(selected_variants)
     run_id, run_root = unique_run_root(validation_kind)
     started_at = datetime.now().isoformat(timespec="seconds")
@@ -636,46 +842,60 @@ def main() -> int:
         "dt_refine": args.dt_refine,
         "ny_refine": args.ny_refine,
         "variants": selected_variants,
-        "advectionScheme": args.advection_scheme,
-        "schemeDisplay": ADVECTION_SCHEME_LABELS.get(args.advection_scheme, args.advection_scheme),
+        "advectionScheme": advection_schemes[0],
+        "advectionSchemes": advection_schemes,
+        "schemeDisplay": ", ".join(ADVECTION_SCHEME_LABELS.get(scheme, scheme) for scheme in advection_schemes),
+        "solverBackend": args.solver_backend,
+        "maxPlannedNy": max_planned_ny,
+        "solverArtifactMode": "full" if args.keep_solver_artifacts else "validation_minimal",
         "summary_files": {
             "validation_csv": "validation_summary.csv",
             "curve_metrics_csv": "curve_metrics_summary.csv",
+            "scheme_comparison_csv": "scheme_comparison_summary.csv",
         },
     })
 
     all_rows: list[dict[str, Any]] = []
     all_curve_rows: list[dict[str, Any]] = []
+    all_scheme_comparison_rows: list[dict[str, Any]] = []
     for case in selected:
         values = read_case(case.path)
         case_rows: list[dict[str, Any]] = []
+        case_curve_rows: list[dict[str, Any]] = []
         case_result_root = run_root / f"case_{case.case_id:04d}"
         ensure_dir(case_result_root)
         case_variants = planned_variants_for_case(selected_variants, values, args.ny_refine)
-        for variant in case_variants:
-            work_dir, result_dir, variant_case = prepare_variant(
-                case.case_id,
-                values,
-                variant,
-                run_root,
-                args.dt_refine,
-                args.ny_refine,
-                args.max_endT,
-            )
-            extra = [
-                "--cpu-thread-mode", "internal",
-                "--advection-scheme", args.advection_scheme,
-            ]
-            run_info = run_solver(solver, work_dir, case.case_id, extra, args.timeout_seconds)
-            write_json(result_dir / "run_info.json", run_info)
-            copy_outputs(work_dir, result_dir, case.case_id)
-            row = variant_metrics(case.case_id, args.advection_scheme, variant, run_info, result_dir, variant_case)
-            row["run_id"] = run_id
-            row["validation_kind"] = validation_kind
-            case_rows.append(row)
-        add_reference_differences(case_rows)
-        curve_rows = add_curve_metrics(case_rows, args.max_endT)
-        for row in curve_rows:
+        for advection_scheme in advection_schemes:
+            scheme_rows: list[dict[str, Any]] = []
+            for variant in case_variants:
+                work_dir, result_dir, variant_case = prepare_variant(
+                    case.case_id,
+                    advection_scheme,
+                    values,
+                    variant,
+                    run_root,
+                    args.dt_refine,
+                    args.ny_refine,
+                    args.max_endT,
+                    use_scheme_subdir,
+                )
+                extra = validation_solver_args(advection_scheme, args.keep_solver_artifacts)
+                run_info = run_solver(solver, work_dir, case.case_id, extra, args.timeout_seconds)
+                write_json(result_dir / "run_info.json", run_info)
+                copy_outputs(work_dir, result_dir, case.case_id)
+                row = variant_metrics(case.case_id, advection_scheme, variant, run_info, result_dir, variant_case)
+                row["run_id"] = run_id
+                row["validation_kind"] = validation_kind
+                scheme_rows.append(row)
+            add_reference_differences(scheme_rows)
+            scheme_curve_rows = add_curve_metrics(scheme_rows, args.max_endT)
+            for row in scheme_curve_rows:
+                row["run_id"] = run_id
+                row["validation_kind"] = validation_kind
+            case_rows.extend(scheme_rows)
+            case_curve_rows.extend(scheme_curve_rows)
+        case_scheme_comparison_rows = add_scheme_comparisons(case_rows, args.max_endT)
+        for row in case_scheme_comparison_rows:
             row["run_id"] = run_id
             row["validation_kind"] = validation_kind
         write_json(case_result_root / "validation_summary.json", {
@@ -686,10 +906,13 @@ def main() -> int:
             "dt_refine": args.dt_refine,
             "ny_refine": args.ny_refine,
             "max_endT": args.max_endT,
-            "advection_scheme": args.advection_scheme,
-            "scheme_display": ADVECTION_SCHEME_LABELS.get(args.advection_scheme, args.advection_scheme),
+            "advection_scheme": advection_schemes[0],
+            "advection_schemes": advection_schemes,
+            "scheme_display": ", ".join(ADVECTION_SCHEME_LABELS.get(scheme, scheme) for scheme in advection_schemes),
+            "solver_artifact_mode": "full" if args.keep_solver_artifacts else "validation_minimal",
             "variants": case_rows,
-            "curve_metrics": curve_rows,
+            "curve_metrics": case_curve_rows,
+            "scheme_comparisons": case_scheme_comparison_rows,
             "candidate_scheme_rows": [
                 "Baseline Explicit",
                 "High-Resolution Advection",
@@ -698,7 +921,8 @@ def main() -> int:
             "selection_policy": "No automatic scheme selection is performed.",
         })
         all_rows.extend(case_rows)
-        all_curve_rows.extend(curve_rows)
+        all_curve_rows.extend(case_curve_rows)
+        all_scheme_comparison_rows.extend(case_scheme_comparison_rows)
 
     flat_rows = [
         {field: row.get(field, "") for field in SUMMARY_FIELDS}
@@ -708,12 +932,19 @@ def main() -> int:
         {field: row.get(field, "") for field in CURVE_METRIC_FIELDS}
         for row in all_curve_rows
     ]
+    flat_scheme_comparison_rows = [
+        {field: row.get(field, "") for field in SCHEME_COMPARISON_FIELDS}
+        for row in all_scheme_comparison_rows
+    ]
     run_validation_csv = run_root / "validation_summary.csv"
     run_curve_csv = run_root / "curve_metrics_summary.csv"
+    run_scheme_comparison_csv = run_root / "scheme_comparison_summary.csv"
     write_csv(run_validation_csv, flat_rows, SUMMARY_FIELDS)
     write_csv(run_curve_csv, flat_curve_rows, CURVE_METRIC_FIELDS)
+    write_csv(run_scheme_comparison_csv, flat_scheme_comparison_rows, SCHEME_COMPARISON_FIELDS)
     write_csv(RESULTS_ROOT / "validation_summary.csv", flat_rows, SUMMARY_FIELDS)
     write_csv(RESULTS_ROOT / "curve_metrics_summary.csv", flat_curve_rows, CURVE_METRIC_FIELDS)
+    write_csv(RESULTS_ROOT / "scheme_comparison_summary.csv", flat_scheme_comparison_rows, SCHEME_COMPARISON_FIELDS)
     finished_at = datetime.now().isoformat(timespec="seconds")
     run_summary = {
         "run_id": run_id,
@@ -728,12 +959,17 @@ def main() -> int:
         "dt_refine": args.dt_refine,
         "ny_refine": args.ny_refine,
         "variants": selected_variants,
-        "advectionScheme": args.advection_scheme,
-        "schemeDisplay": ADVECTION_SCHEME_LABELS.get(args.advection_scheme, args.advection_scheme),
+        "advectionScheme": advection_schemes[0],
+        "advectionSchemes": advection_schemes,
+        "schemeDisplay": ", ".join(ADVECTION_SCHEME_LABELS.get(scheme, scheme) for scheme in advection_schemes),
+        "solverBackend": args.solver_backend,
+        "maxPlannedNy": max_planned_ny,
+        "solverArtifactMode": "full" if args.keep_solver_artifacts else "validation_minimal",
         "run_root": str(run_root),
         "summary_files": {
             "validation_csv": "validation_summary.csv",
             "curve_metrics_csv": "curve_metrics_summary.csv",
+            "scheme_comparison_csv": "scheme_comparison_summary.csv",
         },
     }
     write_json(run_summary_path, run_summary)
@@ -746,11 +982,12 @@ def main() -> int:
         "finished_at": finished_at,
         "status": "complete",
     })
-    print(f"Validated {len(selected)} case(s) with {len(selected_variants)} variant(s) each.")
+    print(f"Validated {len(selected)} case(s) with {len(selected_variants)} variant(s) and {len(advection_schemes)} scheme(s) each.")
     print(f"Solver: {solver}")
     print(f"Run: {validation_kind}/{run_id}")
     print(f"Summary CSV: {run_validation_csv}")
     print(f"Curve metrics CSV: {run_curve_csv}")
+    print(f"Scheme comparison CSV: {run_scheme_comparison_csv}")
     return 0
 
 

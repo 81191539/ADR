@@ -2,6 +2,8 @@
 
 ADR is a 2D diffusion-convection-adsorption PDE solver. The core solver is written in C++17, supports CPU/OpenMP execution, and can optionally build a CUDA executable when a CUDA compiler is available. The repository also includes a local Python Web UI for editing cases, building/running the solver, and viewing generated results.
 
+For installation prerequisites and quick setup commands, see [ENVIRONMENT.md](ENVIRONMENT.md).
+
 ## Features
 
 - 2D concentration-field simulation with diffusion, advection, and surface adsorption.

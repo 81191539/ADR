@@ -162,6 +162,7 @@ const demo4SchemeBodyEl = document.getElementById("demo4-scheme-body");
 const demo4PrecheckBodyEl = document.getElementById("demo4-precheck-body");
 const demo4ValidationBodyEl = document.getElementById("demo4-validation-body");
 const demo4CurveMetricsBodyEl = document.getElementById("demo4-curve-metrics-body");
+const demo4SchemeComparisonBodyEl = document.getElementById("demo4-scheme-comparison-body");
 const demo4EtaCurveChartEl = document.getElementById("demo4-eta-curve-chart");
 
 async function api(path, options = {}) {
@@ -500,6 +501,7 @@ function renderDemo4Status(status) {
     ["Task kind", task.kind || "-"],
     ["Precheck rows", files.precheckSummary?.rowCount ?? 0],
     ["Validation rows", files.validationSummary?.rowCount ?? 0],
+    ["Scheme pairs", files.schemeComparisonSummary?.rowCount ?? 0],
     ["Summary JSON", files.combinedSummary?.exists ? "generated" : "missing"],
     ["Last finished", task.finishedAt || "-"],
   ];
@@ -572,10 +574,10 @@ function demo4DisplayNy(row) {
 
 function demo4MetricRows(payload, validationRows) {
   const validationMap = new Map(
-    (validationRows || []).map((row) => [`${row.case_id}::${row.variant}`, row])
+    (validationRows || []).map((row) => [`${row.case_id}::${row.advection_scheme || "upwind"}::${row.variant}`, row])
   );
   return (payload.curveMetricRows || []).map((row) => {
-    const validationRow = validationMap.get(`${row.case_id}::${row.variant}`) || null;
+    const validationRow = validationMap.get(`${row.case_id}::${row.advection_scheme || "upwind"}::${row.variant}`) || null;
     return {
       ...row,
       advection_scheme: row.advection_scheme || validationRow?.advection_scheme || "upwind",
@@ -666,6 +668,28 @@ function renderDemo4Results(payload) {
     ],
     curveMetricRows,
     "No curve metrics."
+  );
+  demo4RenderTable(
+    demo4SchemeComparisonBodyEl,
+    [
+      { label: "case", value: "case_id" },
+      { label: "variant", value: (row) => demo4DisplayVariant(row) },
+      { label: "status", value: "comparison_status" },
+      { label: "ny", value: (row) => demo4DisplayNy(row) },
+      { label: "coeff_dt", value: (row) => formatValue(row.coeff_dt) },
+      { label: "eta upwind", value: (row) => formatScientific(row.final_eta_upwind) },
+      { label: "eta tvd-mc", value: (row) => formatScientific(row.final_eta_tvd_mc) },
+      { label: "eta delta", value: (row) => formatScientific(row.final_eta_delta) },
+      { label: "eta rel", value: (row) => formatScientific(row.final_eta_delta_rel) },
+      { label: "RMS abs", value: (row) => formatScientific(row.rmse_abs) },
+      { label: "max abs", value: (row) => formatScientific(row.linf_abs) },
+      { label: "upwind s", value: (row) => formatValue(row.upwind_elapsed_seconds) },
+      { label: "tvd-mc s", value: (row) => formatValue(row.tvd_mc_elapsed_seconds) },
+      { label: "runtime x", value: (row) => formatValue(row.runtime_ratio_tvd_mc_vs_upwind) },
+      { label: "common t", value: (row) => formatValue(row.common_time_end) },
+    ],
+    payload.schemeComparisonRows || payload.summary?.scheme_comparison_rows || [],
+    "No scheme comparison results."
   );
   demo4RenderTable(
     demo4ValidationBodyEl,
@@ -905,6 +929,7 @@ async function handleDemo4Validation(kind) {
   const cases = document.getElementById("demo4-validation-cases")?.value || "";
   const isDt = kind === "dt";
   const advectionScheme = document.getElementById("demo4-validation-advection-scheme")?.value || "upwind";
+  const advectionSchemes = advectionScheme === "compare" ? ["upwind", "tvd-mc"] : [advectionScheme];
   await api("/api/demo4/validate", {
     method: "POST",
     body: JSON.stringify({
@@ -912,6 +937,7 @@ async function handleDemo4Validation(kind) {
       cases,
       kind,
       advectionScheme,
+      advectionSchemes,
       maxEndT: Number(document.getElementById("demo4-validation-max-endt")?.value || 0.00008),
       variants: isDt
         ? ["baseline", "dt_refined"]
@@ -921,7 +947,9 @@ async function handleDemo4Validation(kind) {
       timeoutSeconds: Number(document.getElementById("demo4-validation-timeout")?.value || 300),
     }),
   });
-  const schemeLabel = advectionScheme === "tvd-mc" ? "High-Resolution (TVD-MC)" : "Baseline Upwind";
+  const schemeLabel = advectionScheme === "compare"
+    ? "Upwind vs TVD-MC"
+    : advectionScheme === "tvd-mc" ? "High-Resolution (TVD-MC)" : "Baseline Upwind";
   setDemo4Message(`demo4 ${isDt ? "dt-refine" : "ny-refine"} validation started with ${schemeLabel}.`);
   await refreshDemo4Status();
 }
@@ -3065,4 +3093,3 @@ async function init() {
 init().catch((error) => {
   setRunError(error.message);
 });
-
