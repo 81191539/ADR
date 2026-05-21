@@ -81,6 +81,10 @@ def enrich_validation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 eta_value = numeric_value(row.get("final_eta"))
                 if reference_eta is not None and eta_value is not None:
                     row["final_eta_diff_abs"] = abs(eta_value - reference_eta)
+            if not str(row.get("final_eta_diff_rel", "") or "").strip():
+                eta_value = numeric_value(row.get("final_eta"))
+                if reference_eta is not None and eta_value is not None:
+                    row["final_eta_diff_rel"] = abs(eta_value - reference_eta) / max(abs(reference_eta), 1e-14)
     return rows
 
 
@@ -113,9 +117,12 @@ def enrich_curve_metric_rows(
             "elapsed_seconds",
             "iterations_per_second",
             "final_eta_diff_abs",
+            "final_eta_diff_rel",
         ]:
             if not str(row.get(field, "") or "").strip():
                 row[field] = validation_row.get(field, "")
+        if not str(row.get("final_eta_diff_rel", "") or "").strip():
+            row["final_eta_diff_rel"] = validation_row.get("relative_final_eta_vs_dt_ny_refined", "")
     return curve_rows
 
 

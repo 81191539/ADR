@@ -423,7 +423,7 @@ def case_summary(case_id: int, file_path: Path) -> dict[str, Any]:
 
 
 def parse_case_query_ids(query: str) -> set[int] | None:
-    normalized = query.strip()
+    normalized = re.sub(r"\s*-\s*", "-", query.strip())
     if not normalized or not re.fullmatch(r"[0-9,\-\s]+", normalized):
         return None
 
@@ -2593,7 +2593,8 @@ DEMO4_TASK_STATE = Demo4TaskState()
 
 def parse_demo4_case_ids(text: str) -> list[int]:
     case_ids: set[int] = set()
-    for raw_part in re.split(r"[\s,]+", text.strip()):
+    normalized = re.sub(r"\s*-\s*", "-", text.strip())
+    for raw_part in re.split(r"[\s,]+", normalized):
         part = raw_part.strip()
         if not part:
             continue
@@ -2941,6 +2942,10 @@ def demo4_enrich_validation_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
                 eta_value = demo4_numeric_value(row.get("final_eta"))
                 if reference_eta is not None and eta_value is not None:
                     row["final_eta_diff_abs"] = abs(eta_value - reference_eta)
+            if not str(row.get("final_eta_diff_rel", "") or "").strip():
+                eta_value = demo4_numeric_value(row.get("final_eta"))
+                if reference_eta is not None and eta_value is not None:
+                    row["final_eta_diff_rel"] = abs(eta_value - reference_eta) / max(abs(reference_eta), 1e-14)
     return rows
 
 
@@ -2973,9 +2978,12 @@ def demo4_enrich_curve_metric_rows(
             "elapsed_seconds",
             "iterations_per_second",
             "final_eta_diff_abs",
+            "final_eta_diff_rel",
         ]:
             if not str(row.get(field, "") or "").strip():
                 row[field] = validation_row.get(field, "")
+        if not str(row.get("final_eta_diff_rel", "") or "").strip():
+            row["final_eta_diff_rel"] = validation_row.get("relative_final_eta_vs_dt_ny_refined", "")
     return curve_rows
 
 

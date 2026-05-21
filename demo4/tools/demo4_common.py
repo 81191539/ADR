@@ -99,7 +99,8 @@ def parse_case_selection(text: str | None, available: dict[int, Path]) -> list[C
     if not text:
         return [CaseFile(case_id, path) for case_id, path in available.items()]
     selected: set[int] = set()
-    for raw in re.split(r"[\s,]+", text.strip()):
+    normalized = re.sub(r"\s*-\s*", "-", text.strip())
+    for raw in re.split(r"[\s,]+", normalized):
         if not raw:
             continue
         if "-" in raw:

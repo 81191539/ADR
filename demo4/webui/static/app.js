@@ -592,6 +592,10 @@ function demo4MetricRows(payload, validationRows) {
         validationRow?.iterations_per_second ?? row.iterations_per_second,
       final_eta_diff_abs:
         validationRow?.final_eta_diff_abs ?? row.final_eta_diff_abs,
+      final_eta_diff_rel:
+        row.final_eta_diff_rel ??
+        validationRow?.final_eta_diff_rel ??
+        validationRow?.relative_final_eta_vs_dt_ny_refined,
     };
   });
 }
@@ -654,17 +658,14 @@ function renderDemo4Results(payload) {
       { label: "reference", value: (row) => demo4DisplayReferenceVariant(row) },
       { label: "status", value: "comparison_status" },
       { label: "ny", value: (row) => demo4DisplayNy(row) },
-      { label: "max abs", value: (row) => formatScientific(row.linf_abs) },
+      { label: "final eta rel", value: (row) => formatScientific(row.final_eta_diff_rel) },
       { label: "max rel", value: (row) => formatScientific(row.linf_rel) },
-      { label: "final eta diff", value: (row) => formatScientific(row.final_eta_diff_abs) },
+      { label: "RMS rel", value: (row) => formatScientific(row.rmse_rel) },
+      { label: "AUC rel", value: (row) => formatScientific(row.auc_rel_diff) },
       { label: "runtime (s)", value: (row) => formatValue(row.elapsed_seconds) },
       { label: "iter/s", value: (row) => formatValue(row.iterations_per_second) },
       { label: "common t", value: (row) => formatValue(row.common_time_end) },
       { label: "coeff_dt", value: (row) => formatValue(row.coeff_dt) },
-      { label: "RMS abs", value: (row) => formatScientific(row.rmse_abs) },
-      { label: "RMS rel", value: (row) => formatScientific(row.rmse_rel) },
-      { label: "AUC abs", value: (row) => formatScientific(row.auc_abs_diff) },
-      { label: "AUC rel", value: (row) => formatScientific(row.auc_rel_diff) },
     ],
     curveMetricRows,
     "No curve metrics."
