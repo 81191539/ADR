@@ -197,3 +197,69 @@ Recommended priority:
 - Should demo4 keep three fixed schemes, or allow experimental scheme rows to be added later?
 - What is the minimum benchmark set for moving a candidate from theoretical to measured?
 - Which refined result should be treated as the reference for each metric?
+
+## Current Completion Review
+
+As of the transition to demo5, demo4 should be treated as a useful but
+unfinished scheme-evaluation platform. The broad framework is in place, but
+the reliability conclusions and new-scheme evidence are not yet fully closed.
+
+### Completed Or Mostly Completed
+
+- Candidate Schemes is visible at the top of the demo4 Evaluation tab.
+- Baseline `ny`-refine and `dt`-refine validation produce timestamped archival
+  outputs under `demo4/results/validation/<kind>/<run_id>/`.
+- Validation writes summary CSV/JSON artifacts for later inspection.
+- Variant display names mostly show actual grid values such as `ny_50`,
+  `ny_100`, and `ny_250`.
+- Validation Progress reports scheme, variant, actual `ny`, elapsed time,
+  current physical time, and progress.
+- Same-condition `upwind` vs `tvd-mc` validation is wired through
+  `--advection-schemes upwind,tvd-mc` and produces
+  `scheme_comparison_summary.csv`.
+- The Pe2 sweep evidence and the transition to demo5 are documented in
+  `demo4/docs/technical_route_analysis.md`.
+
+### Partially Complete And Risky
+
+- Error metrics need cleanup before further conclusions are drawn. The current
+  `final_eta_diff_rel` path has used a guarded denominator,
+  `max(abs(reference), eps)`, in some places. That is not the mathematical
+  relative error when the refined reference is near zero.
+- Future demo4 work should separate at least these metrics:
+  raw relative error `abs(diff) / abs(reference)`, guarded/scaled error,
+  signed difference `eta - eta_ref`, absolute difference, and absolute signal
+  scale.
+- Baseline evidence exists, but pass/fail or reliability classes are not yet
+  generated in a stable machine-readable way.
+- Scheme metadata is still spread across Python tools, WebUI server code, and
+  frontend display logic. It is not yet a single source of truth.
+- The UI can show the necessary tables, but advanced metrics are still too
+  prominent and not clearly separated from primary diagnostics.
+- Validation performance improved enough for selected studies, but there is no
+  formal profiling report or before/after benchmark for the expensive refined
+  cases.
+
+### Not Completed
+
+- High-Resolution Advection is not fully validated. Although TVD-MC can be run
+  and compared against upwind, demo4 does not yet provide a complete evidence
+  package for it: positivity checks, dense/front-shape comparisons, runtime
+  overhead summaries, and case-level pass/fail judgments remain open.
+- Semi-Lagrangian / IMEX was not implemented or validated. It is explicitly
+  deferred to later development.
+- Demo4 does not yet automatically classify a case as baseline reliable,
+  locally refinable, or unreliable pending future algorithm work. That
+  classification becomes the focus of demo5.
+
+### Recommended Resume Order
+
+If demo4 development is resumed later:
+
+1. Fix metric definitions and labels first, especially raw relative error
+   versus guarded/scaled error.
+2. Add signed error and reliability classification to baseline validation.
+3. Move scheme metadata into one source of truth shared by tools, reports, and
+   WebUI.
+4. Re-run and summarize TVD-MC as a measured High-Resolution Advection route.
+5. Only then reconsider larger algorithm tracks such as Semi-Lagrangian / IMEX.

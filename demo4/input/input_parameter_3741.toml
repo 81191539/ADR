@@ -1,0 +1,16 @@
+case_id = 3741
+lam = 0.033333
+Pe = 10
+Pe2 = 457885.697021
+eps = 0.1
+Da = 100
+K0 = 1
+ny = 50
+xpo_l = 0.333333
+xpo_r = 0.666667
+endT = 200
+total_count = 10
+coeff_dt = 0.000236
+x_ini_posi = 5
+alpha = 10
+Sc = 16667
